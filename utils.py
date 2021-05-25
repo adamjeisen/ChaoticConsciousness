@@ -85,7 +85,7 @@ def get_unit_spikes(unit_index, f):
 # ===========================
 
 # window, stride in ms
-# spike_times in s
+# spike_times, test_duration in s
 # returns firing_rate in Hz, bin_locations in s
 # requires spike times to be sorted in increasing order!!
 def spike_times_to_firing_rate(spike_times, window=50, stride=10, test_duration=None, progress_bar=False):
@@ -112,7 +112,7 @@ def spike_times_to_firing_rate(spike_times, window=50, stride=10, test_duration=
         if end == 0 and start != 0:
             end = len(spike_times)
         firing_rate[b] = (end - start) / window
-        bin_location[b] = stride * b + stride / 2
+        bin_location[b] = stride * b + window / 2
         if progress_bar:
             iterator.update()
 
@@ -141,7 +141,7 @@ def get_spike_triggered_average(spike_times, stimulus, length=150, sample_interv
 
     return sta / len(relevant_spikes), len(relevant_spikes)
 
-def get_binary_signals(f):
+def get_binary_stimuli(f):
     sample_interval = get_sample_interval(f, 's')
     airPuff_binary = np.zeros(int(get_test_duration(f) / sample_interval))
     puff_on_times = f['trialInfo']['cpt_puffOn'][:, 0][~np.isnan(f['trialInfo']['cpt_puffOn'][:, 0])]
@@ -158,3 +158,40 @@ def get_binary_signals(f):
         audio_binary[int(toneOn / sample_interval):int(toneOff / sample_interval)] = 1
 
     return airPuff_binary, audio_binary
+
+def get_stimuli_start_and_end_flags(f):
+    airPuff_binary, audio_binary = get_binary_stimuli(f)
+    stimuli = {}
+    for stim_name, stim in [('AirPuff Binary', airPuff_binary), ('Audio Binary', audio_binary)]:
+        stim_begin = (np.diff(stim) == 1).astype(np.int)
+        stim_end = (np.diff(stim) == -1).astype(np.int)
+        stimuli[stim_name + ' (From Start)'] = stim_begin
+        stimuli[stim_name + ' (From End)'] = stim_end
+
+    # both and separate
+    tone_only_begin = np.zeros(len(stim))
+    tone_only_end = np.zeros(len(stim))
+    puff_only_begin = np.zeros(len(stim))
+    puff_only_end = np.zeros(len(stim))
+    both_begin = np.zeros(len(stim))
+    both_end = np.zeros(len(stim))
+    count = 0
+    for t, (puffOn, toneOn) in enumerate(zip(f['trialInfo']['cpt_puffOn'][:, 0], f['trialInfo']['cpt_toneOn'][:, 0])):
+        if np.isnan(puffOn):
+            tone_only_begin[int(toneOn * 1000)] = 1
+            tone_only_end[int(f['trialInfo']['cpt_toneOff'][t, 0] * 1000)] = 1
+        elif np.isnan(toneOn):
+            puff_only_begin[int(puffOn * 1000)] = 1
+            puff_only_end[int(f['trialInfo']['cpt_puffOff'][t, 0] * 1000)] = 1
+        else:  # both are on
+            count += 1
+            both_begin[int(np.min([toneOn, puffOn]) * 1000)] = 1
+            both_end[int(np.max([f['trialInfo']['cpt_toneOff'][t, 0], f['trialInfo']['cpt_puffOff'][t, 0]]) * 1000)] = 1
+    stimuli['Tone Only (From Start)'] = tone_only_begin
+    stimuli['Tone Only (From End)'] = tone_only_end
+    stimuli['Puff Only (From Start)'] = puff_only_begin
+    stimuli['Puff Only (From End)'] = puff_only_end
+    stimuli['Tone and Puff (From Start)'] = both_begin
+    stimuli['Tone and Puff (From End)'] = both_end
+
+    return stimuli
