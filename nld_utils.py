@@ -193,3 +193,30 @@ def compute_average_neighbor_distance(signal_in, m, tau, max_delta=30, num_refer
         iterator.close()
 
     return S
+
+# =================================
+# SIMULATE SPECIFIC SYSTEMS
+# =================================
+
+# dt, T are in milliseconds
+def simulate_lorenz(rho=28, beta=8 / 3, sigma=10, dt=0.01, T=50, initial_condition=None):
+    if initial_condition is None:
+        initial_condition = np.random.normal(size=(3,))
+
+    time_vals = np.arange(0, T, dt)
+    pts = np.zeros((len(time_vals), 3))
+    pts[0] = initial_condition
+
+    for t in range(1, len(time_vals)):
+        x, y, z = pts[t - 1]
+        dx = sigma * (y - x)
+        dy = x * (rho - z) - y
+        dz = x * y - beta * z
+
+        x += dx * dt
+        y += dy * dt
+        z += dz * dt
+
+        pts[t] = [x, y, z]
+
+    return pts
