@@ -6,13 +6,14 @@ import numpy as np
 from tqdm.auto import tqdm
 
 class ReservoirDS:
-    def __init__(self, u, dt=1, D_r=300, d=6, rho=1.2, beta=0, sigma=0.1, a_vals=np.linspace(0, 2, 100),
-                                                squared_unit_input_dims=[], num_squared_units=None, r_init=None):
+    def __init__(self, u, dt=1, D_r=300, d=6, d_tolerance=0.05, rho=1.2, beta=0, sigma=0.1,
+                    a_vals=np.linspace(0, 2, 100), squared_unit_input_dims=[], num_squared_units=None, r_init=None):
         # inputs
         self.u = u # input time series --> (number of time steps, number of dimensions)
         self.D_r = D_r # number of reservoir nodes
         self.dt = dt # s, time step
         self.d = d # average degree of Erdos-Renyi network
+        self.d_tolerance = d_tolerance # tolerance on the average degree of the network (from d)
         self.rho = rho # spectral radius of the adjacency matrix
         self.beta = beta # regularization parameter
         self.sigma = sigma # standard deviation of the input weights
@@ -29,7 +30,7 @@ class ReservoirDS:
             self.r_init = np.zeros(self.D_r)
 
         # compute further variables
-        self.T = u.shape[1]*dt # s, duration of input time series
+        self.T = u.shape[0]*dt # s, duration of input time series
         self.D = u.shape[1] # dimension of input u
         self.W_in = np.random.randn(D_r, self.D) * sigma # input weight matrix
         if squared_unit_input_dims:
@@ -58,8 +59,11 @@ class ReservoirDS:
     def build_connectivity(self, debug=False):
         # set up the adjacency matrix
         p = self.d * self.D_r / (2 * comb(self.D_r, 2))
-        adjacency_graph = nx.erdos_renyi_graph(self.D_r, p)
-        self.avg_degree = np.sum([adjacency_graph.degree[i] for i in range(self.D_r)]) / self.D_r
+        avg_degree = self.d + self.d_tolerance + 1
+        while np.abs(avg_degree - self.d) >= self.d_tolerance:
+            adjacency_graph = nx.erdos_renyi_graph(self.D_r, p)
+            avg_degree = np.sum([adjacency_graph.degree[i] for i in range(self.D_r)]) / self.D_r
+        self.avg_degree = avg_degree
         if debug:
             print(f"The average degree of the network is {self.avg_degree:.2f}")
 
