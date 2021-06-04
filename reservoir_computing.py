@@ -32,7 +32,8 @@ class ReservoirDS:
         # compute further variables
         self.T = u.shape[0]*dt # s, duration of input time series
         self.D = u.shape[1] # dimension of input u
-        self.W_in = np.random.randn(D_r, self.D) * sigma # input weight matrix
+        # self.W_in = np.random.randn(D_r, self.D) * sigma # input weight matrix
+        self.W_in = np.random.uniform(low=-sigma, high=sigma, size=(D_r, self.D))
         if squared_unit_input_dims:
             self.squared_inds = np.random.choice(np.arange(D_r), size=num_squared_units, replace=False)
         else:
@@ -43,7 +44,9 @@ class ReservoirDS:
         self.a = None # network weights are uniform [-a, a]
         self.A = None # the adjacency matrix
         self.spectral_radius = None # the spectral radius of the adjacency matrix
-        self.P = None # the linear readout matrix obtained through linear regression
+        # self.P = None # the linear readout matrix obtained through linear regression
+        self.P1 = None  # the linear readout matrix obtained through linear regression on activations
+        self.P2 = None  # the linear readout matrix obtained through linear regression on squared activations
         self.r_train = None # the activations from the training regime
         self.v_train = None # the network outputs from the training regime
         self.r_test = None  # the activations from the test regime
@@ -111,31 +114,41 @@ class ReservoirDS:
         return r_tilde
 
     def W_out(self, r):
-        r_tilde = self.create_r_tilde(r)
+        # r_tilde = self.create_r_tilde(r)
+        #
+        # # pass vectors through P, using r_tilde if the dimension is in by squared_unit_input_dims
+        # out_vectors = []
+        # for i in range(self.D):
+        #     if i in self.squared_unit_input_dims:
+        #         out_vectors.append(self.P[i] @ r_tilde.T)
+        #     else:
+        #         out_vectors.append(self.P[i] @ r.T)
+        #
+        # return np.array(out_vectors).T
 
-        # pass vectors through P, using r_tilde if the dimension is in by squared_unit_input_dims
-        out_vectors = []
-        for i in range(self.D):
-            if i in self.squared_unit_input_dims:
-                out_vectors.append(self.P[i] @ r_tilde.T)
-            else:
-                out_vectors.append(self.P[i] @ r.T)
+        # return (self.P @ r.T).T
 
-        return np.array(out_vectors).T
+        return (self.P1 @ r.T).T + (self.P2 @ (r**2).T).T
 
     # use MAP estimate of matrix to minimize the linear regression loss function
     def regress_output_weights(self, u, r):
-        P = np.zeros((self.D, self.D_r))
+        # P = np.zeros((self.D, self.D_r))
+        #
+        # r_tilde = self.create_r_tilde(r)
+        #
+        # for i in range(self.D):
+        #     if i in self.squared_unit_input_dims:
+        #         P[i] = np.linalg.inv(r_tilde.T @ r_tilde + self.beta * np.eye(self.D_r)) @ r_tilde.T @ u[:, i]
+        #     else:
+        #         P[i] = np.linalg.inv(r.T @ r + self.beta * np.eye(self.D_r)) @ r.T @ u[:, i]
 
-        r_tilde = self.create_r_tilde(r)
+        # P = (u.T @ np.linalg.pinv(r.T))
+        #
+        # return P
 
-        for i in range(self.D):
-            if i in self.squared_unit_input_dims:
-                P[i] = np.linalg.inv(r_tilde.T @ r_tilde + self.beta * np.eye(self.D_r)) @ r_tilde.T @ u[:, i]
-            else:
-                P[i] = np.linalg.inv(r.T @ r + self.beta * np.eye(self.D_r)) @ r.T @ u[:, i]
+        p = (u.T @ np.linalg.pinv(np.hstack([r, r**2]).T))
 
-        return P
+        return p[:, :self.D_r], p[:, self.D_r:]
 
     def train(self):
         if self.A is None:
@@ -147,7 +160,8 @@ class ReservoirDS:
         for t in range(self.u.shape[0] - 1):
             r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ self.u[t])
 
-        self.P = self.regress_output_weights(self.u[1:], r[1:])
+        # self.P = self.regress_output_weights(self.u[1:], r[1:])
+        self.P1, self.P2 = self.regress_output_weights(self.u[1:], r[1:])
         self.r_train = r
         self.v_train = self.W_out(r)
 
@@ -167,7 +181,8 @@ class ReservoirDS:
     def test(self, T_test):
         if self.A is None:
             self.build_connectivity()
-        if self.P is None:
+        # if self.P is None:
+        if self.P1 is None:
             self.train()
         num_steps_test = int(T_test / self.dt)
         r = np.zeros((num_steps_test, self.D_r))
