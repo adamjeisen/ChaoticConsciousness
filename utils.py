@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import pickle
 from tqdm.notebook import tqdm
 
 # ===========================
@@ -195,3 +196,17 @@ def get_stimuli_start_and_end_flags(f):
     stimuli['Tone and Puff (From End)'] = both_end
 
     return stimuli
+
+# ===========================
+# DATA UTILS
+# ===========================
+
+def save(obj, filepath):
+    with open(filepath, 'wb') as handle:
+        pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+def load(filepath):
+    with open(filepath, 'rb') as handle:
+        obj = pickle.load(handle)
+
+    return obj
