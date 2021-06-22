@@ -4,9 +4,10 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from neural_analysis import spectra
 import numpy as np
-from scipy.optimize import minimize
 from scipy import sparse
 from tqdm.auto import tqdm
+
+from nld_utils import lyap_spectrum_QR
 
 class ReservoirDS:
     def __init__(self, u, dt=1, D_r=300, d=6, d_tolerance=0.01, p=None, rho=1.2, rho_tolerance=0.1,
@@ -148,6 +149,69 @@ class ReservoirDS:
         self.v_test = v_out
         self.num_steps_test = num_steps_test
 
+    def compute_power_spectra(self):
+        power_spectra = []
+        for i in range(self.D):
+            spec_true, freqs_true = spectra.spectrum(self.u[self.num_steps_train:, i], smp_rate=1 / self.dt,
+                                                     spec_type='power', freq_range=[0, 80])
+            spec_test, freqs_test = spectra.spectrum(self.v_test[:, i], smp_rate=1 / self.dt, spec_type='power',
+                                                     freq_range=[0, 80])
+
+            # normalize
+            spec_true  = (spec_true - spec_true.min())/(spec_true.max() - spec_true.min())
+            spec_test = (spec_test - spec_test.min()) / (spec_test.max() - spec_test.min())
+            power_spectra.append(
+                {'true': {'spec': spec_true, 'freqs': freqs_true}, 'test': {'spec': spec_test, 'freqs': freqs_test},
+                 'mse': ((spec_test - spec_true) ** 2).mean()})
+
+        self.power_spectra = power_spectra
+
+    def compute_jacobians(self, debug=False):
+        def sech(x):
+            return 1 / np.cosh(x)
+        Js = np.zeros((self.num_steps_test, self.D_r, self.D_r))
+
+        iterator = None
+        if debug:
+            print("Computing Jacobians")
+            iterator = tqdm(total=self.num_steps_test)
+
+        for t in range(-1, self.num_steps_test - 1):
+            if t < 0:
+                r = self.r_train[-1]
+                v = self.v_train[-1]
+            else:
+                r = self.r_test[t]
+                v = self.v_test[t]
+
+            D1 = np.diag(sech(self.A @ r + self.W_in @ v) ** 2)
+            W_feedback = self.W_in @ self.P
+            W_feedback[:, self.squared_inds] *= 2 * r[self.squared_inds]
+            D2 = self.A + W_feedback
+            Js[t + 1] = D1 @ D2
+
+            if debug:
+                iterator.update()
+        if debug:
+            iterator.close()
+
+        self.Js = Js
+
+    def compute_lyap_spectrum_QR(self, debug=False):
+        # if self.Js is None:
+        #     self.compute_jacobians(debug)
+        self.compute_jacobians(debug)
+        Js = self.Js
+        T = self.num_steps_test*self.dt
+
+        lyaps = lyap_spectrum_QR(Js, T)
+
+        self.lyaps = lyaps
+
+    # =====================================================================
+    # PLOTTING FUNCTIONS
+    # =====================================================================
+
     def plot_train_and_test_results(self, num=None, fig=None):
         if num is None:
             num = self.D
@@ -192,23 +256,6 @@ class ReservoirDS:
         if fig is None:
             plt.show()
 
-    def compute_power_spectra(self):
-        power_spectra = []
-        for i in range(self.D):
-            spec_true, freqs_true = spectra.spectrum(self.u[self.num_steps_train:, i], smp_rate=1 / self.dt,
-                                                     spec_type='power', freq_range=[0, 80])
-            spec_test, freqs_test = spectra.spectrum(self.v_test[:, i], smp_rate=1 / self.dt, spec_type='power',
-                                                     freq_range=[0, 80])
-
-            # normalize
-            spec_true  = (spec_true - spec_true.min())/(spec_true.max() - spec_true.min())
-            spec_test = (spec_test - spec_test.min()) / (spec_test.max() - spec_test.min())
-            power_spectra.append(
-                {'true': {'spec': spec_true, 'freqs': freqs_true}, 'test': {'spec': spec_test, 'freqs': freqs_test},
-                 'mse': ((spec_test - spec_true) ** 2).mean()})
-
-        self.power_spectra = power_spectra
-
     def plot_power_spectra(self, num=None, fig=None):
         if self.power_spectra is None:
             self.compute_power_spectra()
@@ -225,7 +272,6 @@ class ReservoirDS:
             for i in range(self.D):
                 power_spectra_true[i] = self.power_spectra[i]['true']['spec']
                 power_spectra_test[i] = self.power_spectra[i]['test']['spec']
-
 
             freqs = self.power_spectra[0]['true']['freqs']
             axs = fig.subplots(1, 2)
@@ -249,7 +295,7 @@ class ReservoirDS:
             ax.set_xticks(xtick_locs)
             ax.set_xticklabels([f"{val:.1f}" for val in freqs[xtick_locs]])
 
-            fig.suptitle(f"Spectra MSE = {((power_spectra_true - power_spectra_test)**2).sum():.3f}")
+            fig.suptitle(f"Spectra MSE = {((power_spectra_true - power_spectra_test) ** 2).sum():.3f}")
 
             if print_:
                 plt.tight_layout()
@@ -268,7 +314,8 @@ class ReservoirDS:
             for i, ind in enumerate(indices):
                 ax = axs[i]
                 ax.plot(self.power_spectra[ind]['true']['freqs'], self.power_spectra[ind]['true']['spec'], label='actual')
-                ax.plot(self.power_spectra[ind]['test']['freqs'], self.power_spectra[ind]['test']['spec'], label='predicted')
+                ax.plot(self.power_spectra[ind]['test']['freqs'], self.power_spectra[ind]['test']['spec'],
+                        label='predicted')
                 ax.set_title(f"{self.var_names[ind]}, MSE = {self.power_spectra[ind]['mse']:.3f}")
                 ax.set_xlabel('Freqs (Hz)')
                 ax.set_ylabel('Power')
@@ -276,78 +323,6 @@ class ReservoirDS:
 
             if print_:
                 plt.show()
-
-    def compute_jacobians(self, debug=False):
-        def sech(x):
-            return 1 / np.cosh(x)
-        Js = np.zeros((self.num_steps_test, self.D_r, self.D_r))
-
-        iterator = None
-        if debug:
-            print("Computing Jacobians")
-            iterator = tqdm(total=self.num_steps_test)
-
-        for t in range(-1, self.num_steps_test - 1):
-            if t < 0:
-                r = self.r_train[-1]
-                v = self.v_train[-1]
-            else:
-                r = self.r_test[t]
-                v = self.v_test[t]
-
-            D1 = np.diag(sech(self.A @ r + self.W_in @ v) ** 2)
-            W_feedback = self.W_in @ self.P
-            W_feedback[:, self.squared_inds] *= 2 * r[self.squared_inds]
-            D2 = self.A + W_feedback
-            Js[t + 1] = D1 @ D2
-
-            if debug:
-                iterator.update()
-        if debug:
-            iterator.close()
-
-        self.Js = Js
-
-    def compute_lyap_spectrum_QR(self, debug=False):
-        # if self.Js is None:
-        #     self.compute_jacobians(debug)
-        self.compute_jacobians(debug)
-        Js = self.Js
-        T = self.num_steps_test*self.dt
-
-        K, n = Js.shape[0], Js.shape[-1]
-
-        iterator = None
-        if debug:
-            print("Performing QR decomposition...")
-            iterator = tqdm(total=K)
-        Q, R = np.linalg.qr(Js[0])
-        lyaps = np.zeros((n,))
-        if debug:
-            iterator.update()
-
-        for t in range(1, K):
-            Q = Js[t] @ Q
-
-            # Need diagonal of R to be positive, so rewrite Q = Q @ S and R = S @ R, where S_ii = sign(R_ii)
-            S = np.diag(np.sign(np.diag(R)))
-            #         print(np.diag(S@R))
-            lyaps += np.log(np.diag(S @ R))
-
-            Q = Q @ S
-
-            # add diagonal of R to running lyapunov spectrum estimate
-
-            Q, R = np.linalg.qr(Q)
-            if debug:
-                iterator.update()
-
-        if debug:
-            iterator.close()
-
-        lyaps /= T
-
-        self.lyaps = lyaps
 
     def plot_activity_and_outputs(self, fig=None):
         if fig is None:
