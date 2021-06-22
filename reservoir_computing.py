@@ -204,7 +204,7 @@ class ReservoirDS:
         Js = self.Js
         T = self.num_steps_test*self.dt
 
-        lyaps = lyap_spectrum_QR(Js, T)
+        lyaps = lyap_spectrum_QR(Js, T, debug=debug)
 
         self.lyaps = lyaps
 
