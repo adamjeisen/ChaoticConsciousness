@@ -3,8 +3,7 @@ from nolitsa import delay, lyapunov
 import numpy as np
 from scipy.signal import argrelextrema
 from scipy import spatial
-from tqdm.notebook import tqdm
-from statsmodels.tsa import stattools
+from tqdm.auto import tqdm
 
 def embed_signal(x, m, tau):
     embedding = np.zeros((len(x) - m * tau, m))
@@ -193,6 +192,63 @@ def compute_average_neighbor_distance(signal_in, m, tau, max_delta=30, num_refer
         iterator.close()
 
     return S
+
+
+def lyap_spectrum_QR(Js, T, debug=False):
+    K, n = Js.shape[0], Js.shape[-1]
+    old_Q = np.eye(n)
+    H = np.eye(n)
+
+    lexp = np.zeros(n, dtype="float32")
+    lexp_counts = np.zeros(lexp.shape)
+
+    iterator = None
+    if debug:
+        print("Computing Lyapunov spectrum")
+        iterator = tqdm(total=K)
+
+    for t in range(K):
+        H = Js[t] @ H
+
+        # QR-decomposition of T * old_Q
+        mat_Q, mat_R = np.linalg.qr(np.dot(Js[t], old_Q))
+        # force diagonal of R to be positive
+        # (if QR = A then also QLL'R = A with L' = L^-1)
+        sign_diag = np.sign(np.diag(mat_R))
+        sign_diag[np.where(sign_diag == 0)] = 1
+        sign_diag = np.diag(sign_diag)
+        mat_Q = np.dot(mat_Q, sign_diag)
+        mat_R = np.dot(sign_diag, mat_R)
+
+        old_Q = mat_Q
+
+        # successively build sum for Lyapunov exponents
+        diag_R = np.diag(mat_R)
+
+        # filter zeros in mat_R (would lead to -infs)
+        idx = np.where(diag_R > 0)
+        lexp_i = np.zeros(diag_R.shape, dtype="float32")
+        lexp_i[idx] = np.log(diag_R[idx])
+        lexp_i[np.where(diag_R == 0)] = np.inf
+
+        lexp[idx] += lexp_i[idx]
+        lexp_counts[idx] += 1
+
+        if debug:
+            iterator.update()
+    if debug:
+        iterator.close()
+
+    # it may happen that all R-matrices contained zeros => exponent really has
+    # to be -inf
+
+    # normalize exponents over number of individual mat_Rs
+    # lexp[idx] /= lexp_counts[idx]
+    lexp[np.where(lexp_counts == 0)] = np.inf
+
+    lexp /= T
+
+    return lexp
 
 # =================================
 # SIMULATE SPECIFIC SYSTEMS
