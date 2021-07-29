@@ -11,7 +11,8 @@ from nld_utils import lyap_spectrum_QR
 
 class ReservoirDS:
     def __init__(self, u, dt=1, D_r=300, d=6, d_tolerance=0.01, p=None, rho=1.2, rho_tolerance=0.1,
-                        beta=0, sigma=0.1, squared_inds=None, r_init=None, var_names=None):
+                        beta=0, sigma=0.1, squared_inds=None, r_init=None, var_names=None,
+                                                                                train_noise=False, test_noise=False):
         # inputs
         self.u = u # input time series --> (number of time steps, number of dimensions)
         self.D_r = D_r # number of reservoir nodes
@@ -30,6 +31,8 @@ class ReservoirDS:
             # r_init = np.random.randn(self.D_r)*0.01
             self.r_init = np.zeros(self.D_r)
         self.var_names = var_names # names of the variables - must have length D (dimension of input u)
+        self.train_noise = train_noise # boolean, whether to include Gaussian noise on the training inputs
+        self.test_noise = test_noise # boolean, whether to include Gaussian noise on the testing inputs
 
         # compute further variables
         self.T = u.shape[0]*dt # s, duration of input time series
@@ -54,7 +57,9 @@ class ReservoirDS:
         self.v_train = None # the network outputs from the training regime
         self.r_test = None  # the activations from the test regime
         self.v_test = None  # the network outputs from the test regime
-        self.power_spectra = None  # power spectra from actual test sequence and predicted test sequence
+        self.power_spectra_true = None # power spectra from actual test sequence
+        self.power_spectra_test = None # power spectra from predicted test sequence
+        self.freqs = None # frequencies for power spectra
         self.Js = None # Jacobian matrices for the test regime
         self.lyaps = None # lyapunov spectrum for the reservoir
 
@@ -124,7 +129,7 @@ class ReservoirDS:
         r[0] = self.r_init
 
         for t in range(num_steps_train - 1):
-            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ self.u[t])
+            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ (self.u[t] + self.train_noise*np.random.randn(self.D)))
 
         self.P = self.regress_output_weights(self.u[1:num_steps_train], r[1:])
         self.r_train = r
@@ -138,33 +143,40 @@ class ReservoirDS:
         r = np.zeros((num_steps_test, self.D_r))
         v_out = np.zeros((num_steps_test, self.D))
 
-        r[0] = np.tanh(self.A @ self.r_train[-1] + self.W_in @ self.v_train[-1])
+        r[0] = np.tanh(self.A @ self.r_train[-1] + self.W_in @ (self.v_train[-1] + self.test_noise*np.random.randn(self.D)))
         v_out[0] = self.W_out(r[0])
 
         for t in range(num_steps_test - 1):
-            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ v_out[t])
+            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ (v_out[t] + + self.test_noise*np.random.randn(self.D)))
             v_out[t + 1] = self.W_out(r[t + 1])
 
         self.r_test = r
         self.v_test = v_out
         self.num_steps_test = num_steps_test
 
-    def compute_power_spectra(self):
-        power_spectra = []
+    def compute_power_spectra(self, freq_range=np.array([0, 80]), normalize=True, spec_scale=100):
+        freqs, _ = spectra.get_freq_sampling(1 / self.dt, spectra._next_power_of_2(self.num_steps_test),
+                                                                                        freq_range=freq_range)
+        num_freqs = len(freqs)
+
+        power_spectra_true = np.zeros((self.D, num_freqs))
+        power_spectra_test = np.zeros((self.D, num_freqs))
+
         for i in range(self.D):
-            spec_true, freqs_true = spectra.spectrum(self.u[self.num_steps_train:, i], smp_rate=1 / self.dt,
-                                                     spec_type='power', freq_range=[0, 80])
-            spec_test, freqs_test = spectra.spectrum(self.v_test[:, i], smp_rate=1 / self.dt, spec_type='power',
-                                                     freq_range=[0, 80])
+            spec_true, _ = spectra.spectrum(self.u[self.num_steps_train:, i], smp_rate=1 / self.dt,
+                                                     spec_type='power', freq_range=freq_range)
+            spec_test, _ = spectra.spectrum(self.v_test[:, i], smp_rate=1 / self.dt, spec_type='power',
+                                                     freq_range=freq_range)
+            # normalize (to 0-1)
+            if normalize:
+                spec_true  = spec_scale*(spec_true - spec_true.min())/(spec_true.max() - spec_true.min())
+                spec_test = spec_scale*(spec_test - spec_test.min()) / (spec_test.max() - spec_test.min())
+            power_spectra_true[i] = spec_true
+            power_spectra_test[i] = spec_test
 
-            # normalize
-            spec_true  = (spec_true - spec_true.min())/(spec_true.max() - spec_true.min())
-            spec_test = (spec_test - spec_test.min()) / (spec_test.max() - spec_test.min())
-            power_spectra.append(
-                {'true': {'spec': spec_true, 'freqs': freqs_true}, 'test': {'spec': spec_test, 'freqs': freqs_test},
-                 'mse': ((spec_test - spec_true) ** 2).mean()})
-
-        self.power_spectra = power_spectra
+        self.power_spectra_true = power_spectra_true
+        self.power_spectra_test = power_spectra_test
+        self.freqs = freqs
 
     def compute_jacobians(self, debug=False):
         def sech(x):
@@ -205,104 +217,112 @@ class ReservoirDS:
         T = self.num_steps_test*self.dt
 
         lyaps = lyap_spectrum_QR(Js, T, debug=debug)
-
+        lyaps.sort()
+        lyaps = lyaps[::-1]
         self.lyaps = lyaps
 
     # =====================================================================
     # PLOTTING FUNCTIONS
     # =====================================================================
 
-    def plot_train_and_test_results(self, num=None, fig=None):
-        if num is None:
+    def plot_train_and_test_results(self, num=None, indices=None, fig=None):
+        if num is None and indices is None:
             num = self.D
             indices = np.arange(self.D)
         else:
-            indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
+            if indices is None:
+                indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
+            else:
+                num = len(indices)
 
         if fig is None:
             fig = plt.figure(figsize=(12, 4))
-        subfigs = fig.subfigures(1, 2)
+        # subfigs = fig.subfigures(1, 2, width_ratios = [self.num_steps_train/(self.num_steps_test + self.num_steps_train),
+        #                                         self.num_steps_test/(self.num_steps_test + self.num_steps_train)])
+
+        train_width = self.num_steps_train/(self.num_steps_test + self.num_steps_train)
+        test_width = self.num_steps_test/(self.num_steps_test + self.num_steps_train)
+        axs = fig.subplots(num, 2, sharex='col', sharey='row',
+                           gridspec_kw={'width_ratios': [train_width, test_width]})
 
         # ====================
         # TRAIN RESULTS
         # ====================
-        subfig = subfigs[0]
-        axs = subfig.subplots(num, 1, sharex='all')
+        # subfig = subfigs[0]
+        # axs = subfig.subplots(num, 1, sharex='all')
 
-        for i, ax in zip(indices, axs):
+        for i, ax in zip(indices, axs[:, 0]):
             ax.plot(np.arange(1, self.num_steps_train) * self.dt, self.u[1:self.num_steps_train, i], label='actual')
             ax.plot(np.arange(1, self.num_steps_train) * self.dt, self.v_train[1:, i], label='predicted')
             ax.set_ylabel(self.var_names[i])
 
-        axs[0].legend()
-        axs[-1].set_xlabel('Time (s)')
-        subfig.suptitle('Training Results')
+        # axs[0].legend()
+        # axs[-1].set_xlabel('Time (s)')
+        # subfig.suptitle('Training Results')
 
         # ====================
         # TEST RESULTS
         # ====================
-        subfig = subfigs[1]
-        axs = subfig.subplots(num, 1, sharex='all')
+        # subfig = subfigs[1]
+        # axs = subfig.subplots(num, 1, sharex='all')
 
-        for i, ax in zip(indices, axs):
-            ax.plot(np.arange(self.num_steps_test) * self.dt, self.u[self.num_steps_train:, i], label='actual')
-            ax.plot(np.arange(self.num_steps_test) * self.dt, self.v_test[:, i], label='predicted')
-            ax.set_ylabel(self.var_names[i])
+        for i, ax in zip(indices, axs[:, 1]):
+            ax.plot(np.array(np.arange(self.num_steps_test) + self.num_steps_train) * self.dt, self.u[self.num_steps_train:, i], label='actual')
+            ax.plot(np.array(np.arange(self.num_steps_test) + self.num_steps_train) * self.dt, self.v_test[:, i], label='predicted')
+            # ax.set_ylabel(self.var_names[i])
 
-        axs[0].legend()
-        axs[-1].set_xlabel('Time (s)')
-        subfig.suptitle('Training Results')
+        axs[0][0].legend()
+        axs[-1][0].set_xlabel('Time (s)')
+        # subfig.suptitle('Training Results')
 
         if fig is None:
             plt.show()
 
-    def plot_power_spectra(self, num=None, fig=None):
-        if self.power_spectra is None:
-            self.compute_power_spectra()
+    def plot_power_spectra(self, num=None, indices=None, fig=None):
+        # if self.power_spectra_true is None:
+        #     self.compute_power_spectra()
 
-        if num is None:
+        self.compute_power_spectra()
+
+        if num is None and indices is None:
             if fig is None:
                 print_ = True
                 fig = plt.figure(figsize=(12, 4))
             else:
                 print_ = False
 
-            power_spectra_true = np.zeros((self.D, len(self.power_spectra[0]['true']['spec'])))
-            power_spectra_test = np.zeros((self.D, len(self.power_spectra[0]['true']['spec'])))
-            for i in range(self.D):
-                power_spectra_true[i] = self.power_spectra[i]['true']['spec']
-                power_spectra_test[i] = self.power_spectra[i]['test']['spec']
-
-            freqs = self.power_spectra[0]['true']['freqs']
             axs = fig.subplots(1, 2)
 
             ax = axs[0]
             ax.set_title("Actual Spectra")
-            im = ax.pcolormesh(power_spectra_true)
+            im = ax.pcolormesh(self.power_spectra_true)
             fig.colorbar(im, ax=ax, label='Power')
             ax.set_xlabel("Frequency")
             ax.set_ylabel("Input Dimension")
-            xtick_locs = [int(val) for val in plt.xticks()[0][:-1]]
+            xtick_locs = np.int0(ax.get_xticks()[:-1])
             ax.set_xticks(xtick_locs)
-            ax.set_xticklabels([f"{val:.1f}" for val in freqs[xtick_locs]])
+            ax.set_xticklabels([f"{val:.1f}" for val in self.freqs[xtick_locs]])
 
             ax = axs[1]
             ax.set_title("Predicted Spectra")
-            im = ax.pcolormesh(power_spectra_test)
+            im = ax.pcolormesh(self.power_spectra_test)
             fig.colorbar(im, ax=ax, label='Power')
             ax.set_xlabel("Frequency")
             ax.set_ylabel("Input Dimension")
             ax.set_xticks(xtick_locs)
-            ax.set_xticklabels([f"{val:.1f}" for val in freqs[xtick_locs]])
+            ax.set_xticklabels([f"{val:.1f}" for val in self.freqs[xtick_locs]])
 
-            fig.suptitle(f"Spectra MSE = {((power_spectra_true - power_spectra_test) ** 2).sum():.3f}")
+            fig.suptitle(f"Spectra MSE = {((self.power_spectra_true - self.power_spectra_test) ** 2).mean():.3f}")
 
             if print_:
                 plt.tight_layout()
                 plt.show()
 
         else:
-            indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
+            if indices is None:
+                indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
+            else:
+                num = len(indices)
 
             if fig is None:
                 print_ = True
@@ -313,10 +333,10 @@ class ReservoirDS:
             axs = fig.subplots(1, num)
             for i, ind in enumerate(indices):
                 ax = axs[i]
-                ax.plot(self.power_spectra[ind]['true']['freqs'], self.power_spectra[ind]['true']['spec'], label='actual')
-                ax.plot(self.power_spectra[ind]['test']['freqs'], self.power_spectra[ind]['test']['spec'],
-                        label='predicted')
-                ax.set_title(f"{self.var_names[ind]}, MSE = {self.power_spectra[ind]['mse']:.3f}")
+                ax.plot(self.freqs, self.power_spectra_true[ind], label='actual')
+                ax.plot(self.freqs, self.power_spectra_test[ind], label='predicted')
+                ax.set_title(f"{self.var_names[ind]}, MSE = "
+                             f"{((self.power_spectra_true[ind] - self.power_spectra_test[ind])**2).mean():.3f}")
                 ax.set_xlabel('Freqs (Hz)')
                 ax.set_ylabel('Power')
             ax.legend()
@@ -381,16 +401,18 @@ class ReservoirDS:
             plt.tight_layout()
             plt.show()
 
-    def plot_all(self):
+    def plot_all(self, num=3):
 
         fig = plt.figure(constrained_layout=True, figsize=(12, 12))
         subfigs = fig.subfigures(4, 1, height_ratios=[1.3, 2, 1, 1])
+
+        indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
 
         # =================
         # TRAINING AND TESTING RESULTS
         # =================
         subfigs[0].suptitle('Train and Test Results')
-        self.plot_train_and_test_results(num=3, fig=subfigs[0])
+        self.plot_train_and_test_results(indices=indices, fig=subfigs[0])
         # =================
         # PLOT NETWORK ACTIVITY AND OUTPUTS
         # =================
@@ -401,5 +423,5 @@ class ReservoirDS:
         # PLOT POWER SPECTRA
         # =================
         self.plot_power_spectra(fig=subfigs[2])
-        self.plot_power_spectra(num=3, fig=subfigs[3])
+        self.plot_power_spectra(indices=indices, fig=subfigs[3])
         plt.show()
