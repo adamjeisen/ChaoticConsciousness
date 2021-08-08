@@ -115,13 +115,17 @@ class ReservoirDS:
 
         return u.T @ X @ np.linalg.inv(X.T @ X + self.beta*np.eye(self.D_r))
 
-    def train_and_test(self, percent_training_data=0.8):
+    def train_and_test(self, percent_training_data=0.8, train_noise=None, test_noise=None):
         # ============
         # TRAIN
         # ============
 
         num_steps_train = int(self.u.shape[0] * percent_training_data)
+        if train_noise is None:
+            train_noise = np.zeros((num_steps_train, self.D))
         num_steps_test = self.u.shape[0] - num_steps_train
+        if test_noise is None:
+            test_noise = np.zeros((num_steps_test, self.D))
         if self.A is None:
             self.build_connectivity()
         # u[t] ----> r[t+1] ---> v[t + 1] = u[t + 1]
@@ -129,7 +133,7 @@ class ReservoirDS:
         r[0] = self.r_init
 
         for t in range(num_steps_train - 1):
-            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ (self.u[t] + self.train_noise*np.random.randn(self.D)))
+            r[t + 1] = np.tanh(self.A @ r[t] + self.W_in @ (self.u[t] + train_noise[t]))
 
         self.P = self.regress_output_weights(self.u[1:num_steps_train], r[1:])
         self.r_train = r
@@ -143,7 +147,7 @@ class ReservoirDS:
         r = np.zeros((num_steps_test, self.D_r))
         v_out = np.zeros((num_steps_test, self.D))
 
-        r[0] = np.tanh(self.A @ self.r_train[-1] + self.W_in @ (self.v_train[-1] + self.test_noise*np.random.randn(self.D)))
+        r[0] = np.tanh(self.A @ self.r_train[-1] + self.W_in @ (self.v_train[-1] + test_noise[0]))
         v_out[0] = self.W_out(r[0])
 
         for t in range(num_steps_test - 1):
@@ -402,10 +406,10 @@ class ReservoirDS:
             plt.show()
 
     def plot_all(self, num=3):
-
-        fig = plt.figure(constrained_layout=True, figsize=(12, 12))
-        subfigs = fig.subfigures(4, 1, height_ratios=[1.3, 2, 1, 1])
-
+        num = min(num, self.D)
+        fig = plt.figure(constrained_layout=True, figsize=(12, 8))
+        # subfigs = fig.subfigures(4, 1, height_ratios=[1.3, 2, 1, 1])
+        subfigs = fig.subfigures(3, 1, height_ratios=[1.3, 1, 1])
         indices = np.random.choice(np.arange(self.D), size=(num,), replace=False)
 
         # =================
@@ -413,15 +417,16 @@ class ReservoirDS:
         # =================
         subfigs[0].suptitle('Train and Test Results')
         self.plot_train_and_test_results(indices=indices, fig=subfigs[0])
-        # =================
-        # PLOT NETWORK ACTIVITY AND OUTPUTS
-        # =================
-        subfigs[1].suptitle('Network Activity and Outputs')
-        self.plot_activity_and_outputs(fig=subfigs[1])
+        # # =================
+        # # PLOT NETWORK ACTIVITY AND OUTPUTS
+        # # =================
+        # subfigs[1].suptitle('Network Activity and Outputs')
+        # self.plot_activity_and_outputs(fig=subfigs[1])
 
         # =================
         # PLOT POWER SPECTRA
         # =================
-        self.plot_power_spectra(fig=subfigs[2])
-        self.plot_power_spectra(indices=indices, fig=subfigs[3])
+        self.plot_power_spectra(fig=subfigs[1])
+        self.plot_power_spectra(indices=indices, fig=subfigs[2])
+
         plt.show()

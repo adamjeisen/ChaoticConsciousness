@@ -1,4 +1,5 @@
 import h5py
+from neural_analysis.matIO import loadmat
 import numpy as np
 import pickle
 from tqdm.notebook import tqdm
@@ -23,8 +24,8 @@ def get_test_duration(f, units='s'):
     return test_duration
 
 # get the sample interval (units per sample)
-def get_sample_interval(f, units='ms'):
-    smpInterval = f['lfpSchema']['smpInterval'][0, 0]
+def get_sample_interval(f, units='s'):
+    smpInterval = f['lfpSchema']['smpInterval'][0][0]
     if units == 'ms':
         smpInterval *= 1000
     return smpInterval

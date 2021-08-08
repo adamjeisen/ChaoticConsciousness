@@ -1,6 +1,7 @@
 import nolds
 from nolitsa import delay, lyapunov
 import numpy as np
+from scipy.integrate import odeint
 from scipy.signal import argrelextrema
 from scipy import spatial
 from tqdm.auto import tqdm
@@ -254,8 +255,8 @@ def lyap_spectrum_QR(Js, T, debug=False):
 # SIMULATE SPECIFIC SYSTEMS
 # =================================
 
-# dt, T are in milliseconds
-def simulate_lorenz(rho=28, beta=8 / 3, sigma=10, dt=0.01, T=50, initial_condition=None):
+# T, dt are in seconds
+def simulate_lorenz(T=50, dt=0.01, rho=28, beta=8 / 3, sigma=10, initial_condition=None):
     if initial_condition is None:
         initial_condition = np.random.normal(size=(3,))
 
@@ -276,3 +277,98 @@ def simulate_lorenz(rho=28, beta=8 / 3, sigma=10, dt=0.01, T=50, initial_conditi
         pts[t] = [x, y, z]
 
     return pts
+
+# T is in seconds
+def simulate_baier_klein(T=5000, initial_condition=None):
+    if initial_condition is None:
+        initial_condition = np.random.normal(size=(3,))
+    
+    time_vals = np.arange(0, T)
+    pts = np.zeros((len(time_vals), 3))
+    pts[0] = initial_condition
+    
+    for t in range(1, len(time_vals)):
+        x, y, z = pts[t - 1]
+        x_new = 1.76 - y**2 - 0.1*z
+        y_new = x
+        z_new = y
+        
+        pts[t] = [x_new, y_new, z_new]
+    
+    return pts
+
+# T, dt are in seconds
+def simulate_rossler(T=100, dt=0.02, a=0.1, b=0.1, c=14, initial_condition=None):
+    if initial_condition is None:
+        initial_condition = np.random.normal(size=(3,))
+
+    time_vals = np.arange(0, T, dt)
+    pts = np.zeros((len(time_vals), 3))
+    pts[0] = initial_condition
+    
+    for t in range(1, len(time_vals)):
+        x, y, z = pts[t - 1]
+        dx = -y - z
+        dy = x + a*y
+        dz = b + z*(x - c)
+        
+        x += dx * dt
+        y += dy * dt
+        z += dz * dt
+
+        pts[t] = [x, y, z]
+    
+    return pts
+
+# T, dt are in seconds
+# Pendulum rod lengths (m), bob masses (kg).
+# g is the gravitational acceleration (m.s-2).
+def simulate_double_pendulum(T=30, dt=0.01, L1=1, L2=1, m1=1, m2=1, g=9.81):
+
+    def deriv(y, t, L1, L2, m1, m2):
+        """Return the first derivatives of y = theta1, z1, theta2, z2."""
+        theta1, z1, theta2, z2 = y
+
+        c, s = np.cos(theta1-theta2), np.sin(theta1-theta2)
+
+        theta1dot = z1
+        z1dot = (m2*g*np.sin(theta2)*c - m2*s*(L1*z1**2*c + L2*z2**2) -
+                 (m1+m2)*g*np.sin(theta1)) / L1 / (m1 + m2*s**2)
+        theta2dot = z2
+        z2dot = ((m1+m2)*(L1*z1**2*s - g*np.sin(theta2) + g*np.sin(theta1)*c) + 
+                 m2*L2*z2**2*s*c) / L2 / (m1 + m2*s**2)
+        return theta1dot, z1dot, theta2dot, z2dot
+
+    def calc_E(y):
+        """Return the total energy of the system."""
+
+        th1, th1d, th2, th2d = y.T
+        V = -(m1+m2)*L1*g*np.cos(th1) - m2*L2*g*np.cos(th2)
+        T = 0.5*m1*(L1*th1d)**2 + 0.5*m2*((L1*th1d)**2 + (L2*th2d)**2 +
+                2*L1*L2*th1d*th2d*np.cos(th1-th2))
+        return T + V
+
+    t = np.arange(0, T, dt)
+    # Initial conditions: theta1, dtheta1/dt, theta2, dtheta2/dt.
+    y0 = np.array([3*np.pi/7, 0, 3*np.pi/4, 0])
+
+    # Do the numerical integration of the equations of motion
+    y = odeint(deriv, y0, t, args=(L1, L2, m1, m2))
+
+    # Check that the calculation conserves total energy to within some tolerance.
+    EDRIFT = 0.05
+    # Total energy from the initial conditions
+    E = calc_E(y0)
+    if np.max(np.sum(np.abs(calc_E(y) - E))) > EDRIFT:
+        sys.exit('Maximum energy drift of {} exceeded.'.format(EDRIFT))
+
+    # Unpack z and theta as a function of time
+    theta1, theta2 = y[:,0], y[:,2]
+
+    # Convert to Cartesian coordinates of the two bob positions.
+    x1 = L1 * np.sin(theta1)
+    y1 = -L1 * np.cos(theta1)
+    x2 = x1 + L2 * np.sin(theta2)
+    y2 = y1 - L2 * np.cos(theta2)
+    
+    return np.array([x1, y1, x2, y2]).T
