@@ -5,6 +5,7 @@ import networkx as nx
 from neural_analysis import spectra
 import numpy as np
 from scipy import sparse
+from tabulate import tabulate
 from tqdm.auto import tqdm
 
 from nld_utils import lyap_spectrum_QR
@@ -430,3 +431,67 @@ class ReservoirDS:
         self.plot_power_spectra(indices=indices, fig=subfigs[2])
 
         plt.show()
+    
+    def print_params(self):
+        headers = ['Variable Name', 'Value', 'Description']
+        table = [
+            ['D', self.D, 'dimension of input u'],
+            ['D_r', self.D_r, 'number of reservoir nodes'],
+            ['dt', self.dt, 'time step (s)'],
+            ['avg_degree', f"{self.avg_degree:.2f}", 'average degree of Erdos-Renyi Adjacency network'],
+            ['rho', self.rho, 'spectral radius of the adjacency matrix'],
+            ['beta', self.beta, 'regularization parameter'],
+            ['sigma', f"{self.sigma:.3f}", 'input network weights are uniform [-sigma, sigma]'],
+            ['T', self.T, 'duration of input time series (s)']
+        ]
+        print(tabulate(table, headers=headers, tablefmt='orgtbl'))
+        # print(tabulate([['Alice', 24], ['Bob', 19]], headers=['Name', 'Age'], tablefmt='orgtbl'))
+        # # inputs
+        # self.u = u # input time series --> (number of time steps, number of dimensions)
+        # self.D_r = D_r # number of reservoir nodes
+        # self.dt = dt # s, time step
+        # self.d = d # average degree of Erdos-Renyi network
+        # self.d_tolerance = d_tolerance  # tolerance on the average degree of the network (from d)
+        # self.p = p # probability of an edge in the Erdos-Renyi network - if not None, overrides d
+        # self.rho = rho # spectral radius of the adjacency matrix
+        # self.beta = beta # regularization parameter
+        # self.sigma = sigma # input network weights are uniform [-sigma, sigma]
+        # self.squared_inds = squared_inds # indices of the reservoir to square - default is to square all even rows
+        # if self.squared_inds is None:
+        #     self.squared_inds = np.arange(D_r)[np.arange(D_r) % 2 == 0]
+        # self.r_init = r_init # initialization to the reservoir (must have shape (D_r,), defaults to zeros)
+        # if self.r_init is None:
+        #     # r_init = np.random.randn(self.D_r)*0.01
+        #     self.r_init = np.zeros(self.D_r)
+        # self.var_names = var_names # names of the variables - must have length D (dimension of input u)
+        # self.train_noise = train_noise # boolean, whether to include Gaussian noise on the training inputs
+        # self.test_noise = test_noise # boolean, whether to include Gaussian noise on the testing inputs
+
+        # # compute further variables
+        # self.T = u.shape[0]*dt # s, duration of input time series
+        # self.D = u.shape[1] # dimension of input u
+        # indices = np.arange(D_r)
+        # np.random.shuffle(indices)
+        # W_in = np.zeros((D_r, self.D))
+        # for i, idx in enumerate(indices):
+        #     u_dim = int(i/(D_r/self.D))
+        #     W_in[idx, u_dim] = np.random.uniform(low=-sigma, high=sigma)
+        # # W_in = np.random.randn(D_r, self.D)*(1/np.sqrt(self.D))
+        # self.W_in = W_in
+
+        # # placeholders
+        # self.avg_degree = None # average degree of the adjacency graph
+        # self.a = None # network weights are uniform [-a, a]
+        # self.A = None # the adjacency matrix
+        # self.P = None # the linear readout matrix obtained through linear regression
+        # self.num_steps_train = None # number of training steps
+        # self.num_steps_test = None # number of test steps
+        # self.r_train = None # the activations from the training regime
+        # self.v_train = None # the network outputs from the training regime
+        # self.r_test = None  # the activations from the test regime
+        # self.v_test = None  # the network outputs from the test regime
+        # self.power_spectra_true = None # power spectra from actual test sequence
+        # self.power_spectra_test = None # power spectra from predicted test sequence
+        # self.freqs = None # frequencies for power spectra
+        # self.Js = None # Jacobian matrices for the test regime
+        # self.lyaps = None # lyapunov spectrum for the reservoir
