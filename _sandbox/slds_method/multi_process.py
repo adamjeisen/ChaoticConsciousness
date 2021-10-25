@@ -12,9 +12,7 @@ import time
 from tqdm.auto import tqdm
 
 sys.path.append('../..')
-from nld_utils import simulate_lorenz
-from up_down import get_up_down
-from utils import get_sample_interval, load, save
+from utils import save
 
 def slds_eigs_worker(param_tuple):
 
@@ -71,6 +69,7 @@ def main():
         # filename = r'/home/adameisen/common/datasets/anesthesia/mat/propofolWakeUp/Mary-Anesthesia-20170203-02.mat'
     else:
         filename = r'/om/user/eisenaj/ChaoticConsciousness/data/propofolPuffTone/Mary-Anesthesia-20160809-01.mat'
+        os.chdir('/om2/user/eisenaj/code/ChaoticConsciousness/_sandbox/slds_method')
     print("Loading data ...")
     start = time.process_time()
     electrode_info, lfp, lfp_schema, session_info, spike_times, unit_info = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema', 'sessionInfo', 'spikeTimes', 'unitInfo'], verbose=False)
