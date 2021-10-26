@@ -4,7 +4,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12	
-#SBATCH --time=10:00
+#SBATCH --time=10:00:00
+#SBATCH --mem-per-cpu=5000
 
 source /om2/user/eisenaj/anaconda/etc/profile.d/conda.sh
 conda activate chaotic-consciousness

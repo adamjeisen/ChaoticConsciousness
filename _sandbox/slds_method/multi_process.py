@@ -12,6 +12,7 @@ import time
 from tqdm.auto import tqdm
 
 sys.path.append('../..')
+sys.path.append('/om2/user/eisenaj/code/ChaoticConsciousness')
 from utils import save
 
 def slds_eigs_worker(param_tuple):
@@ -69,7 +70,6 @@ def main():
         # filename = r'/home/adameisen/common/datasets/anesthesia/mat/propofolWakeUp/Mary-Anesthesia-20170203-02.mat'
     else:
         filename = r'/om/user/eisenaj/ChaoticConsciousness/data/propofolPuffTone/Mary-Anesthesia-20160809-01.mat'
-        os.chdir('/om2/user/eisenaj/code/ChaoticConsciousness/_sandbox/slds_method')
     print("Loading data ...")
     start = time.process_time()
     electrode_info, lfp, lfp_schema, session_info, spike_times, unit_info = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema', 'sessionInfo', 'spikeTimes', 'unitInfo'], verbose=False)
@@ -85,14 +85,13 @@ def main():
     # --------
     # User-guided SLDS parameters
     # --------
-    n_disc_states = 2      # number of discrete states
-    latent_dim = 10 # number of latent dimensions
+    latent_dim = 4 # number of latent dimensions
     # transitions = "standard" # transition class
     transitions = "recurrent_only"
-    # stride = 10*60 # s
-    # duration = 10*60 # s
-    stride = 2000
-    duration = 0.2
+    stride = 60 # s
+    duration = 60 # s
+    # stride = 2000
+    # duration = 0.2
 
     length = int(duration/dt)
     start_times = np.arange(0, lfp.shape[0]*dt - duration + 0.1, stride).astype(int)
@@ -132,7 +131,6 @@ def main():
         var_names=var_names,
         transitions=transitions,
         emissions_dim=emissions_dim,
-        n_disc_states=n_disc_states,
         latent_dim=latent_dim,
     )
     save(run_params, os.path.join(data_dir, f'run_params'))
