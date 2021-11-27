@@ -15,17 +15,17 @@ sys.path.append('../..')
 sys.path.append('/om2/user/eisenaj/code/ChaoticConsciousness')
 from utils import save
 
-def slds_eigs_worker(param_tuple):
+def slds_eigs_worker(param_tuple, savefile=True, verbose=False):
 
     (start_time, start_step, data, transitions, emissions_dim, n_disc_states, latent_dim, data_dir) = param_tuple
     
     # Create the model and initialize its parameters
-    slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, transitions=transitions, emissions="gaussian_orthog", verbose=False)
+    slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, transitions=transitions, emissions="gaussian_orthog", verbose=verbose)
 
     # Fit the model using Laplace-EM with a structured variational posterior
     q_lem_elbos, q_lem = slds.fit(data, method="laplace_em",
                                    variational_posterior="structured_meanfield",
-                                   num_iters=10, alpha=0.0, verbose=False)
+                                   num_iters=10, alpha=0.0, verbose=verbose)
      
     criticality_inds = np.zeros((n_disc_states, latent_dim))
     eigs = np.zeros((n_disc_states, latent_dim), dtype='complex')
@@ -54,7 +54,10 @@ def slds_eigs_worker(param_tuple):
         disc_states=disc_states
     )
 
-    save(results, os.path.join(data_dir, f"start_time_{start_time}"))
+    if savefile:
+        save(results, os.path.join(data_dir, f"start_time_{start_time}"))
+    else:
+        return results
 
 def main():
 
@@ -62,7 +65,7 @@ def main():
     # LOAD DATA
     # ============================================
 
-    local = False
+    local = True
 
     if local:
         # filename = '../../__data__/Mary-Anesthesia-20160809-01.mat'
@@ -72,8 +75,9 @@ def main():
         filename = r'/om/user/eisenaj/ChaoticConsciousness/data/propofolPuffTone/Mary-Anesthesia-20160809-01.mat'
     print("Loading data ...")
     start = time.process_time()
-    electrode_info, lfp, lfp_schema, session_info, spike_times, unit_info = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema', 'sessionInfo', 'spikeTimes', 'unitInfo'], verbose=False)
-    spike_times = spike_times[0]
+    # electrode_info, lfp, lfp_schema, session_info, spike_times, unit_info = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema', 'sessionInfo', 'spikeTimes', 'unitInfo'], verbose=False)
+    electrode_info, lfp, lfp_schema, session_info, unit_info = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema', 'sessionInfo', 'unitInfo'], verbose=False)
+    # spike_times = spike_times[0]
     dt = lfp_schema['smpInterval'][0]
     T = lfp.shape[0]
     print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
@@ -85,16 +89,23 @@ def main():
     # --------
     # User-guided SLDS parameters
     # --------
-    latent_dim = 4 # number of latent dimensions
+    latent_dim = 2 # number of latent dimensions
     # transitions = "standard" # transition class
-    transitions = "recurrent_only"
-    stride = 60 # s
-    duration = 60 # s
+    transitions = "standard"
+    stride = 5 # s
+    duration = 5 # s
     # stride = 2000
     # duration = 0.2
 
     length = int(duration/dt)
     start_times = np.arange(0, lfp.shape[0]*dt - duration + 0.1, stride).astype(int)
+
+    # areas = ['vlPFC', 'FEF', 'CPB', '7b']
+    # areas = np.unique(electrode_info['area'])
+    areas = ['vlPFC']
+    unit_indices = np.arange(lfp.shape[1])[pd.Series(electrode_info['area']).isin(areas)]
+    var_names = [f"unit_{unit_num} {electrode_info['area'][unit_num]}" for unit_num in unit_indices]
+
 
     # --------
     # Process parameters
@@ -104,13 +115,8 @@ def main():
     # --------
     # Set the parameters of the SLDS
     # --------
-    emissions_dim = lfp.shape[1]      # number of observed dimensions
+    emissions_dim = len(unit_indices)      # number of observed dimensions
     
-    # areas = ['vlPFC', 'FEF', 'CPB', '7b']
-    areas = np.unique(electrode_info['area'])
-    unit_indices = np.arange(lfp.shape[1])[pd.Series(electrode_info['area']).isin(areas)]
-    var_names = [f"unit_{unit_num} {electrode_info['area'][unit_num]}" for unit_num in unit_indices]
-
     # --------
     # Data Directory
     # --------
@@ -126,12 +132,14 @@ def main():
 
     run_params = dict(
         duration=duration,
+        dt=dt,
         stride=stride,
         length=length,
         var_names=var_names,
         transitions=transitions,
         emissions_dim=emissions_dim,
         latent_dim=latent_dim,
+        unit_indices=unit_indices,
     )
     save(run_params, os.path.join(data_dir, f'run_params'))
 
@@ -174,7 +182,7 @@ def main():
     # --------
 
     if multi_process:
-        PROCESSES = os.cpu_count() - 1
+        PROCESSES = os.cpu_count() - 2
         with multiprocessing.Pool(PROCESSES) as pool:
             list(tqdm(pool.imap(slds_eigs_worker, param_list), total=len(param_list)))
 
