@@ -34,12 +34,14 @@ def compute_eigs(pts, dt, window=1, stride=None, return_sigma_norms=False, retur
         pca = PCA(n_components=PCA_dim)
         results['explained_variance'] = np.zeros((num_win, PCA_dim))
         if return_A:
-            results['A_mats'] = np.zeros((num_win, PCA_dim, PCA_dim))
+            results['A_mat'] = np.zeros((num_win, PCA_dim, PCA_dim))
+            results['A_mat_with_bias'] = np.zeros((num_win, PCA_dim + 1, PCA_dim))
         # results['params'] = np.zeros((num_win, PCA_dim + 1, PCA_dim)) # to get coefs, params[1:].T
     else:
         results['eigs'] = np.zeros((num_win, pts.shape[1]))
         if return_A:
-            results['A_mats'] = np.zeros((num_win, pts.shape[1], pts.shape[1]))
+            results['A_mat'] = np.zeros((num_win, pts.shape[1], pts.shape[1]))
+            results['A_mat_with_bias'] = np.zeros((num_win, pts.shape[1] + 1, pts.shape[1]))
         # results['params'] = np.zeros((num_win, pts.shape[1] + 1, pts.shape[1])) # to get coefs, params[1:].T
     
     if return_sigma_norms:
@@ -48,9 +50,9 @@ def compute_eigs(pts, dt, window=1, stride=None, return_sigma_norms=False, retur
     results['AIC'] = np.zeros(num_win)
 
     results['window_locs'] = np.zeros((num_win, 2), dtype=np.int)
-    results['1step_pred'] = np.zeros((num_win - 1, pts.shape[1]))
-    results['1step_pred_dist'] = np.zeros(num_win - 1)
-    results['mse'] = np.zeros(num_win - 1)
+    # results['1step_pred'] = np.zeros((num_win - 1, pts.shape[1]))
+    # results['1step_pred_dist'] = np.zeros(num_win - 1)
+    # results['mse'] = np.zeros(num_win - 1)
 
     # -------------------
     # Compute Eigenvalues
@@ -68,17 +70,18 @@ def compute_eigs(pts, dt, window=1, stride=None, return_sigma_norms=False, retur
         model = VAR(chunk)
         VAR_results = model.fit(1)
         if return_A:
-            results['A_mats'][i] = VAR_results.coefs[0]
+            results['A_mat'][i] = VAR_results.coefs[0]
+            results['A_mat_with_bias'][i] = VAR_results.params
         e,_ = np.linalg.eig(VAR_results.coefs[0])      
         results['eigs'][i] = np.abs(e)
 
         results['sigma2_ML'][i] = np.linalg.norm(VAR_results.endog[1:] - (VAR_results.endog_lagged @ VAR_results.params), axis=1).sum()/(k - 2)
         results['AIC'][i] = k*np.log(results['sigma2_ML'][i]) + 2
 
-        if i < num_win - 1:
-            results['1step_pred'][i] = np.concatenate([[1], VAR_results.endog[-1]]) @ VAR_results.params
-            results['1step_pred_dist'][i] = np.linalg.norm(pts[results['window_locs'][i][1]] - results['1step_pred'][i])
-            results['mse'][i] = (results['1step_pred_dist'][i]**2)/pts.shape[1]
+        # if i < num_win - 1:
+        #     results['1step_pred'][i] = np.concatenate([[1], VAR_results.endog[-1]]) @ VAR_results.params
+        #     results['1step_pred_dist'][i] = np.linalg.norm(pts[results['window_locs'][i][1]] - results['1step_pred'][i])
+        #     results['mse'][i] = (results['1step_pred_dist'][i]**2)/pts.shape[1]
         # results['params'][i] = VAR_results.params
 
         if return_sigma_norms:
