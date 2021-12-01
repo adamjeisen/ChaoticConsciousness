@@ -1,8 +1,42 @@
 import numpy as np
-from sklearn.decomposition import PCA
-from statsmodels.tsa.api import VAR
 from scipy.linalg import svdvals
+from sklearn.decomposition import PCA
+import ssm
+from statsmodels.tsa.api import VAR
 from tqdm.auto import tqdm
+
+def slds_compute_eigs(data, transitions, emissions_dim, n_disc_states, latent_dim, verbose=False):
+    
+    # Create the model and initialize its parameters
+    slds = ssm.SLDS(emissions_dim, n_disc_states, latent_dim, transitions=transitions, emissions="gaussian_orthog", verbose=verbose)
+
+    # Fit the model using Laplace-EM with a structured variational posterior
+    q_lem_elbos, q_lem = slds.fit(data, method="laplace_em",
+                                   variational_posterior="structured_meanfield",
+                                   num_iters=10, alpha=0.0, verbose=verbose)
+     
+    criticality_inds = np.zeros((n_disc_states, latent_dim))
+    eigs = np.zeros((n_disc_states, latent_dim), dtype='complex')
+    for i in range(n_disc_states):
+        eigs[i] = np.linalg.eig(slds.dynamics._As[i])[0]
+        criticality_inds[i] = np.abs(eigs[i])
+        criticality_inds[i].sort()
+        criticality_inds[i] = criticality_inds[i][::-1]
+    
+    q_lem_x = q_lem.mean_continuous_states[0]
+    
+    disc_states = slds.most_likely_states(q_lem_x, data)
+
+    results = dict(
+        slds=slds,
+        q_lem_elbos=q_lem_elbos,
+        q_lem=q_lem,
+        eigs=eigs,
+        criticality_inds=criticality_inds,
+        disc_states=disc_states
+    )
+
+    return results
 
 # returns the eigenvalues of the VAR matrix for each window of data in the time series
 # also, optionally, returns the covariance matrix of the white noise for each window
