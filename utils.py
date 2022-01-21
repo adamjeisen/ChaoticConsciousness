@@ -1,7 +1,10 @@
+from datetime import datetime
 import h5py
 from neural_analysis.matIO import loadmat
 import numpy as np
+import os
 import pickle
+import re
 from tqdm.notebook import tqdm
 
 # ===========================
@@ -161,42 +164,38 @@ def get_binary_stimuli(f):
 
     return airPuff_binary, audio_binary
 
-def get_stimuli_start_and_end_flags(f):
-    airPuff_binary, audio_binary = get_binary_stimuli(f)
-    stimuli = {}
-    for stim_name, stim in [('AirPuff Binary', airPuff_binary), ('Audio Binary', audio_binary)]:
-        stim_begin = (np.diff(stim) == 1).astype(np.int)
-        stim_end = (np.diff(stim) == -1).astype(np.int)
-        stimuli[stim_name + ' (From Start)'] = stim_begin
-        stimuli[stim_name + ' (From End)'] = stim_end
+# def get_stimuli_start_and
+# sys.path.append('../')ff(stim) == -1).astype(np.int)
+#         stimuli[stim_name + ' (From Start)'] = stim_begin
+#         stimuli[stim_name + ' (From End)'] = stim_end
 
-    # both and separate
-    tone_only_begin = np.zeros(len(stim))
-    tone_only_end = np.zeros(len(stim))
-    puff_only_begin = np.zeros(len(stim))
-    puff_only_end = np.zeros(len(stim))
-    both_begin = np.zeros(len(stim))
-    both_end = np.zeros(len(stim))
-    count = 0
-    for t, (puffOn, toneOn) in enumerate(zip(f['trialInfo']['cpt_puffOn'][:, 0], f['trialInfo']['cpt_toneOn'][:, 0])):
-        if np.isnan(puffOn):
-            tone_only_begin[int(toneOn * 1000)] = 1
-            tone_only_end[int(f['trialInfo']['cpt_toneOff'][t, 0] * 1000)] = 1
-        elif np.isnan(toneOn):
-            puff_only_begin[int(puffOn * 1000)] = 1
-            puff_only_end[int(f['trialInfo']['cpt_puffOff'][t, 0] * 1000)] = 1
-        else:  # both are on
-            count += 1
-            both_begin[int(np.min([toneOn, puffOn]) * 1000)] = 1
-            both_end[int(np.max([f['trialInfo']['cpt_toneOff'][t, 0], f['trialInfo']['cpt_puffOff'][t, 0]]) * 1000)] = 1
-    stimuli['Tone Only (From Start)'] = tone_only_begin
-    stimuli['Tone Only (From End)'] = tone_only_end
-    stimuli['Puff Only (From Start)'] = puff_only_begin
-    stimuli['Puff Only (From End)'] = puff_only_end
-    stimuli['Tone and Puff (From Start)'] = both_begin
-    stimuli['Tone and Puff (From End)'] = both_end
+#     # both and separate
+#     tone_only_begin = np.zeros(len(stim))
+#     tone_only_end = np.zeros(len(stim))
+#     puff_only_begin = np.zeros(len(stim))
+#     puff_only_end = np.zeros(len(stim))
+#     both_begin = np.zeros(len(stim))
+#     both_end = np.zeros(len(stim))
+#     count = 0
+#     for t, (puffOn, toneOn) in enumerate(zip(f['trialInfo']['cpt_puffOn'][:, 0], f['trialInfo']['cpt_toneOn'][:, 0])):
+#         if np.isnan(puffOn):
+#             tone_only_begin[int(toneOn * 1000)] = 1
+#             tone_only_end[int(f['trialInfo']['cpt_toneOff'][t, 0] * 1000)] = 1
+#         elif np.isnan(toneOn):
+#             puff_only_begin[int(puffOn * 1000)] = 1
+#             puff_only_end[int(f['trialInfo']['cpt_puffOff'][t, 0] * 1000)] = 1
+#         else:  # both are on
+#             count += 1
+#             both_begin[int(np.min([toneOn, puffOn]) * 1000)] = 1
+#             both_end[int(np.max([f['trialInfo']['cpt_toneOff'][t, 0], f['trialInfo']['cpt_puffOff'][t, 0]]) * 1000)] = 1
+#     stimuli['Tone Only (From Start)'] = tone_only_begin
+#     stimuli['Tone Only (From End)'] = tone_only_end
+#     stimuli['Puff Only (From Start)'] = puff_only_begin
+#     stimuli['Puff Only (From End)'] = puff_only_end
+#     stimuli['Tone and Puff (From Start)'] = both_begin
+#     stimuli['Tone and Puff (From End)'] = both_end
 
-    return stimuli
+#     return stimuli
 
 # ===========================
 # DATA UTILS
@@ -211,3 +210,30 @@ def load(filepath):
         obj = pickle.load(handle)
 
     return obj
+
+def get_result_path(results_dir, session, window, stride=None):
+    if stride is None:
+        stride = window
+    
+    file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}"
+    regex = re.compile(file_template)
+    matching_files = []
+    for file in os.listdir(results_dir):
+        if regex.match(file):
+            matching_files.append(file)
+    
+    # pick the most recent result, if there are multiple
+    if len(matching_files) == 1:
+        file = matching_files[0]
+    else:
+        file = None
+        date = datetime(1996, 11, 8)
+        for test_file in matching_files:
+            test_date = datetime.strptime('_'.join(file.split('_')[-2:]), '%b-%d-%Y_%H%M')
+            if test_date > date:
+                file = test_file
+                date = test_date
+    if file is None:
+        raise ValueError(f"File starting with {file_template} not found.")
+    
+    return os.path.join(results_dir, file)
