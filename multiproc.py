@@ -46,8 +46,8 @@ def compute_VAR(window_data, unit_indices=None, PCA_dim=-1):
     window_data['sigma_norm'] = np.linalg.norm(VAR_results.sigma_u, ord=2)
 
 def compute_causality(window_data, p=1):
-    window_data['causality'] = np.zeros((num_units, num_units))
     num_units = window_data['data'].shape[1]
+    window_data['causality'] = np.zeros((num_units, num_units))
 
     lags = [p]
     for i in range(num_units):
@@ -61,6 +61,7 @@ def compute_causality(window_data, p=1):
             window_data['causality'][i, j] = np.log(np.var(restricted_error)/np.var(unrestricted_error))
 
 def compute_correlations(window_data):
+    num_units = window_data['data'].shape[1]
     window_data['correlations'] = np.zeros((num_units, num_units))
     window_data['p_vals'] = np.zeros((num_units, num_units))
     num_units = window_data['data'].shape[1]
@@ -78,7 +79,6 @@ def worker(worker_name, task_queue, message_queue=None, areas=None):
             # if message_queue is not None:
             #     message_queue.put((worker_name, "checking in", "DEBUG"))
             file_path, results_dir, task_type = task_queue.get_nowait()
-            time.sleep(10)
             window_data = load(file_path)
             
             if task_type == 'VAR':
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     t = time.localtime()
     timestamp = time.strftime('%b-%d-%Y_%H%M', t)
     os.makedirs(log_dir, exist_ok=True)
-    logging.basicConfig(filename=os.path.join(log_dir,f"propofol_multiproc_{timestamp}.log"),
+    logging.basicConfig(filename=os.path.join(log_dir,f"multiproc_{timestamp}.log"),
                             filemode='a',
                             format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
                             datefmt="%Y-%m-%d %H:%M:%S",
@@ -164,7 +164,9 @@ if __name__ == "__main__":
     if task_type not in ['VAR', 'correlations', 'causality']:
         raise ValueError("Task type must be either 'VAR', 'causality' or 'correlations'.")
 
-    all_data_dir = f"/om/user/eisenaj/ChaoticConsciousness/data"
+    logger.info(f"Now running {task_type} on session {session} with window = {window} and stride = {stride}")
+
+    all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     for (dirpath, dirnames, filenames) in os.walk(all_data_dir):
         if f"{session}.mat" in filenames:
             data_class = os.path.basename(dirpath)

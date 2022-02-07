@@ -3,8 +3,11 @@ import h5py
 from neural_analysis.matIO import loadmat
 import numpy as np
 import os
+import pandas as pd
 import pickle
 import re
+import shutil
+import time
 from tqdm.notebook import tqdm
 
 # ===========================
@@ -211,12 +214,43 @@ def load(filepath):
 
     return obj
 
+def compile_folder(folder_to_compile):
+    files = os.listdir(folder_to_compile)
+
+    all_window_data = []
+    for file in tqdm(files):
+        window_data = load(os.path.join(folder_to_compile, file))
+        all_window_data.append(window_data) 
+
+    results_df = pd.DataFrame(all_window_data)
+
+    results_df = results_df.sort_values('start_ind')
+    results_df = results_df.reset_index(drop=True)
+
+    shutil.rmtree(folder_to_compile)
+
+    save(results_df, folder_to_compile)
+    
+    return results_df
+
+def get_data_class(session, all_data_dir):
+    data_class = None
+    for (dirpath, dirnames, filenames) in os.walk(all_data_dir): 
+        if f"{session}.mat" in filenames:
+            data_class = os.path.basename(dirpath)
+            break
+    if data_class is None:
+        raise ValueError(f"Neural data for session {session} could not be found in the provided folder.")
+
+    return data_class
+
 def get_result_path(results_dir, session, window, stride=None):
     if stride is None:
         stride = window
     
     file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}"
     regex = re.compile(file_template)
+
     matching_files = []
     for file in os.listdir(results_dir):
         if regex.match(file):
@@ -229,7 +263,7 @@ def get_result_path(results_dir, session, window, stride=None):
         file = None
         date = datetime(1996, 11, 8)
         for test_file in matching_files:
-            test_date = datetime.strptime('_'.join(file.split('_')[-2:]), '%b-%d-%Y_%H%M')
+            test_date = datetime.strptime('_'.join(test_file.split('_')[-2:]), '%b-%d-%Y_%H%M')
             if test_date > date:
                 file = test_file
                 date = test_date
@@ -237,3 +271,41 @@ def get_result_path(results_dir, session, window, stride=None):
         raise ValueError(f"File starting with {file_template} not found.")
     
     return os.path.join(results_dir, file)
+
+def split_data_into_windows(session, all_data_dir, save_dir=None, windows=[2.5], strides=None, seconds_to_chop=30):
+    if strides is None:
+        strides = windows
+    else:
+        if len(strides) != len(windows):
+            raise ValueError(f"If provided, the lists windows and strides must be the same length. Currently windows = {windows} and strides = {strides}")
+    
+    if save_dir is None:
+        save_dir = all_data_dir
+    
+    data_class = get_data_class(session, all_data_dir)
+
+    filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
+    print("Loading data ...")
+    start = time.process_time()
+    lfp, lfp_schema = loadmat(filename, variables=['lfp', 'lfpSchema'], verbose=False)
+    T = lfp.shape[0]
+    dt = lfp_schema['smpInterval'][0]
+
+    print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
+    
+    end_step = T - int(seconds_to_chop/dt) # take off seconds_to_chop seconds from the end
+    data = lfp[:end_step]
+    for window, stride in zip(windows, strides):
+        print(window, stride)
+        data_dir = os.path.join(save_dir, data_class, f"{session}_window_{window}_stride_{stride}")
+        os.makedirs(data_dir, exist_ok=True)
+        
+        print(f"window = {window} s")
+        num_windows = int(end_step/int(stride/dt))
+        for i in tqdm(range(num_windows)):
+            start = int(stride/dt)*i
+            end = int(stride/dt)*i + int(window/dt)
+            window_data = data[start:end]
+            
+            window_dict = {'data': window_data, 'start_ind': start, 'start_time': start*dt, 'end_ind': end, 'end_time': end*dt}
+            save(window_dict, os.path.join(data_dir, f"window_{i}"))
