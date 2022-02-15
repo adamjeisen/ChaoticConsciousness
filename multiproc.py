@@ -160,7 +160,7 @@ if __name__ == "__main__":
     task_type = args.task_type
 
     if session is None:
-        raise ValueError("Session must be provided! Try: 'Mary-Anesthesia-20160809-01'")
+        raise ValueError("Session must be provided! For instance: 'Mary-Anesthesia-20160809-01'")
     if task_type not in ['VAR', 'correlations', 'causality']:
         raise ValueError("Task type must be either 'VAR', 'causality' or 'correlations'.")
 
