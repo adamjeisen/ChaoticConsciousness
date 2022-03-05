@@ -272,6 +272,83 @@ def get_result_path(results_dir, session, window, stride=None):
     
     return os.path.join(results_dir, file)
 
+def get_optimal_VAR_results(session, data_class, session_info):
+    VAR_all_results_dir = f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/VAR"
+    regex = re.compile(f"{session}_selected_windows_phase")
+    matches = []
+    for file in os.listdir(VAR_all_results_dir):
+        if regex.match(file):
+            matches.append(file)
+
+    if len(matches) == 0:
+        print(f"Window selection hasn't been run for session {session}")
+    elif len(matches) == 1:
+        path_to_file = os.path.join(VAR_all_results_dir, matches[0])
+        print(f"Loading file {path_to_file}")
+        selected_windows = load(path_to_file)
+    else:
+        steps = [int(file.split('_')[-2]) for file in matches]
+        print(f"Selected windows are available for the following forward-step predictions (number of steps): \n{steps}")
+        print("Which one would you like to use?")
+        chosen_steps = input()
+        chosen_steps = int(chosen_steps)
+        ind = np.where(np.array(steps) == chosen_steps)[0]
+        if len(ind) == 0:
+            print(f"{chosen_steps} steps is not an option, try again")
+            selected_windows = None
+        else:
+            ind = ind[0]
+            path_to_file = os.path.join(VAR_all_results_dir, matches[ind])
+            print(f"Loading file {path_to_file}")
+            selected_windows = load(path_to_file)
+    
+    slice_funcs = dict(
+        pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
+        during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
+        post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
+    )
+
+    window_info = {}
+    for phase in selected_windows.keys():
+        for area, window in selected_windows[phase].items():
+            window = int(window) if window % 1 == 0 else window
+            if window not in window_info.keys():
+                window_info[window] = []
+            window_info[window].append((area, phase))
+
+    VAR_results = {}
+    for area in selected_windows['pre'].keys():
+        if area == 'all':
+            VAR_results[area] = {'start_time': [], 'criticality_inds': [], 'A_mat': []}
+        else:
+            VAR_results[area] = {'start_time': [], 'criticality_inds': []}
+
+    for window in window_info.keys():
+        stride = window
+        areas_to_load = np.unique([entry[0] for entry in window_info[window]])
+        VAR_results_dir = get_result_path(VAR_all_results_dir, session, window, stride)
+        
+        temp_results = {}
+        for area in areas_to_load:
+            print(f"Now attempting to load area {area} with window {window}")
+            try:
+                temp_results[area] = load(os.path.join(VAR_results_dir, area))
+            except IsADirectoryError:
+                print(f"Need to compile {os.path.join(VAR_results_dir, area)}")
+                # compile results
+                temp_results[area] = compile_folder(os.path.join(VAR_results_dir, area))
+        
+        for (area, phase) in window_info[window]:
+            VAR_results[area]['criticality_inds'].extend(temp_results[area]['criticality_inds'].iloc[slice_funcs[phase](window)])
+            VAR_results[area]['start_time'].extend(temp_results[area]['start_time'].iloc[slice_funcs[phase](window)])
+            if area == 'all':
+                VAR_results[area]['A_mat'].extend(temp_results[area]['A_mat'].iloc[slice_funcs[phase](window)])
+    
+    for area in VAR_results.keys():
+        VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
+    
+    return VAR_results
+
 def split_data_into_windows(session, all_data_dir, save_dir=None, windows=[2.5], strides=None, seconds_to_chop=30):
     if strides is None:
         strides = windows
