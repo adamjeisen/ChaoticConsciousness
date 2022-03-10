@@ -349,40 +349,284 @@ def get_optimal_VAR_results(session, data_class, session_info):
     
     return VAR_results
 
-def split_data_into_windows(session, all_data_dir, save_dir=None, windows=[2.5], strides=None, seconds_to_chop=30):
-    if strides is None:
-        strides = windows
-    else:
-        if len(strides) != len(windows):
-            raise ValueError(f"If provided, the lists windows and strides must be the same length. Currently windows = {windows} and strides = {strides}")
-    
-    if save_dir is None:
-        save_dir = all_data_dir
-    
+def save_lfp_chunks(session, all_data_dir, chunk_time_s=4*60):
+    all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     data_class = get_data_class(session, all_data_dir)
-
+    
     filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
     print("Loading data ...")
     start = time.process_time()
     lfp, lfp_schema = loadmat(filename, variables=['lfp', 'lfpSchema'], verbose=False)
-    T = lfp.shape[0]
     dt = lfp_schema['smpInterval'][0]
-
     print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
     
-    end_step = T - int(seconds_to_chop/dt) # take off seconds_to_chop seconds from the end
-    data = lfp[:end_step]
-    for window, stride in zip(windows, strides):
-        print(window, stride)
-        data_dir = os.path.join(save_dir, data_class, f"{session}_window_{window}_stride_{stride}")
-        os.makedirs(data_dir, exist_ok=True)
+    save_dir = os.path.join(all_data_dir, data_class, f"{session}_lfp_chunked_{chunk_time_s}s")
+    os.makedirs(save_dir, exist_ok=True)
+    
+    chunk_width = int(chunk_time_s/dt)
+    num_chunks = int(np.ceil(lfp.shape[0]/chunk_width))
+    directory = []
+    for i in tqdm(range(num_chunks)):
+        start_ind = i*chunk_width
+        end_ind = np.min([(i+1)*chunk_width, lfp.shape[0]])
+        chunk = lfp[start_ind:end_ind]
+        filepath = os.path.join(save_dir, f"chunk_{i}")
+        save(chunk, filepath)
+        directory.append(dict(
+            start_ind=start_ind,
+            end_ind=end_ind,
+            filepath=filepath,
+            start_time=start_ind*dt,
+            end_time=end_ind*dt
+        ))
+    
+    directory = pd.DataFrame(directory)
+    
+    save(directory, os.path.join(save_dir, "directory"))
+#         print(f"Chunk: {start_ind/(1000*60)} min to {end_ind/(1000*60)} ([{start_ind}, {end_ind}])")
+
+def load_window_from_chunks(window_start, window_end, directory, N, dt):
+    window_start = int(window_start/dt)
+    window_end = int(window_end/dt)
+
+    start_time_bool = directory.start_ind <= window_start
+    start_row = np.argmin(start_time_bool) - 1 if np.sum(start_time_bool) < len(directory) else len(directory) - 1
+    end_time_bool = directory.end_ind > window_end
+    end_row = np.argmax(end_time_bool) if np.sum(end_time_bool) > 0 else len(directory) - 1
+
+    window_data = np.zeros((window_end - window_start, N))
+
+    pos_in_window = 0
+    for row_ind in range(start_row, end_row + 1):
+        row = directory.iloc[row_ind]
+        chunk = load(row.filepath)
+
+        if row.start_ind <= window_start:
+            start_in_chunk = window_start - row.start_ind
+        else:
+            start_in_chunk = 0
+
+        if row.end_ind <= window_end:
+            end_in_chunk = chunk.shape[0]
+        else:
+            end_in_chunk = window_end - row.start_ind
+
+        # print("----------------------")
+        # print(window_start, window_end)
+        # print(row.start_time, row.end_time)
+        # print(start_in_chunk, end_in_chunk)
+        # print(pos_in_window, pos_in_window + end_in_chunk - start_in_chunk)
+
+        window_data[pos_in_window:pos_in_window + end_in_chunk - start_in_chunk] = chunk[start_in_chunk:end_in_chunk]
+        pos_in_window += end_in_chunk - start_in_chunk
+    
+    return window_data
+
+def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
+    all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
+    data_class = get_data_class(session, all_data_dir)
+
+    results_dir = os.path.join(f'/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/VAR')
+
+    # -----------------------------------------------------
+    # check if session has already computed VAR_results with selected windows
+    # (note that this does not check if more windows have been added since the last computation)
+    # -----------------------------------------------------
+    window_selection_dir = os.path.join(results_dir, 'window_selection')
+    os.makedirs(window_selection_dir, exist_ok=True)
+
+    regex = re.compile(f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
+
+    VAR_results = None
+    for file_name in os.listdir(window_selection_dir):
+        if regex.match(file_name):
+            VAR_results = load(os.path.join(window_selection_dir, file_name))
+            print(f"VAR results with selected windows found for session {session}.")
+            break
+    
+    # -----------------------------------------------------
+    # check if session has already computed selected windows
+    # (note that this does not check if more windows have been added since the last computation)
+    # -----------------------------------------------------
+    regex = re.compile(f"{session}_selected_windows_phases_{pred_steps}_steps")
+
+    window_selection_info = None
+    for file_name in os.listdir(window_selection_dir):
+        if regex.match(file_name):
+            window_selection_info = load(os.path.join(window_selection_dir, file_name))
+            print(f"Window selection info found for session {session}.")
+            break
+
+    if VAR_results is not None:
         
-        print(f"window = {window} s")
-        num_windows = int(end_step/int(stride/dt))
-        for i in tqdm(range(num_windows)):
-            start = int(stride/dt)*i
-            end = int(stride/dt)*i + int(window/dt)
-            window_data = data[start:end]
+        if window_selection_info is None:
+            print("Even though results were found, couldn't find window selection info.")
+
+        return VAR_results, window_selection_info
+
+    # ONLY RUNS THIS IF VAR RESULTS NOT FOUND:
+
+    # -----------------------------------------------------
+    # make slice function
+    # -----------------------------------------------------
+    filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
+    session_info = loadmat(filename, variables=['sessionInfo'], verbose=False)
+    slice_funcs = dict(
+            pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
+            during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
+            post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
+    )
+
+    # -----------------------------------------------------
+    # RUN WINDOW SELECTION
+    # -----------------------------------------------------
+    if window_selection_info is None:
+        print(f"Session {session}: selected windows by phase with {pred_steps}-step prediction not found. Running now.")
+        
+        print("Loading data ...")
+        start = time.process_time()
+        electrode_info, lfp, lfp_schema = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema'], verbose=False)
+        T = len(lfp_schema['index'][0])
+        N = len(lfp_schema['index'][1])
+        dt = lfp_schema['smpInterval'][0]
+        print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
+
+        windows = []
+        regex = re.compile(f"VAR_{session}_window_" + ".{1,}_stride_.{1,}_.*")
+        for file_name in os.listdir(results_dir):
+            if regex.match(file_name):
+                windows.append(float(file_name.split('_')[3]))
+        windows.sort()
+        windows = [int(w) if w % 1 == 0 else w for w in windows]
+
+        # -----------------------------------------------------
+        # compute forward predictions
+        # (note that this assumes window and stride are the same)
+        # -----------------------------------------------------
+
+        T_pred = pred_steps
+
+        predictions = {}
+        true_vals = {}
+        step_mse = {}
+        for area in np.unique(electrode_info['area']):
+            predictions[area] = {}
+            true_vals[area] = {}
+            step_mse[area] = {}
+        predictions['all'] = {}
+        true_vals['all'] = {}
+        step_mse['all'] = {}
+
+        for window in windows:
+            stride = window
+            print(f"Now computing window = {window}")
+            VAR_results_dir = get_result_path(results_dir, session, window, stride)
+            VAR_results = {}
+            for file in tqdm(os.listdir(VAR_results_dir)):
+                try:
+                    VAR_results[file] = load(os.path.join(VAR_results_dir, file))
+                except IsADirectoryError:
+                    print(f"Need to compile {os.path.join(VAR_results_dir, file)}")
+                    # compile results
+                    VAR_results[file] = compile_folder(os.path.join(VAR_results_dir, file))
             
-            window_dict = {'data': window_data, 'start_ind': start, 'start_time': start*dt, 'end_ind': end, 'end_time': end*dt}
-            save(window_dict, os.path.join(data_dir, f"window_{i}"))
+            for area in VAR_results.keys():
+                if area == 'all':
+                    unit_indices = np.arange(len(electrode_info['area']))
+                else:
+                    unit_indices = np.where(electrode_info['area'] == area)[0]
+                
+                predictions[area][window] = np.zeros((len(VAR_results[area]), T_pred, len(unit_indices)))
+                true_vals[area][window] = np.zeros(predictions[area][window].shape)
+
+                for i in tqdm(range(predictions[area][window].shape[0])):
+                    row = VAR_results[area].iloc[i]
+                    start_step = int(stride*i/dt)
+                    x0 = lfp[start_step + int(window/dt) - 1, unit_indices]
+
+                    for t in range(T_pred):
+                        if t == 0:
+                            predictions[area][window][i, t] = np.hstack([[1], x0]) @ row.A_mat_with_bias
+                        else:
+                            predictions[area][window][i, t] = np.hstack([[1], predictions[area][window][i, t - 1]]) @ row.A_mat_with_bias
+
+                    true_vals[area][window][i] = lfp[start_step + int(window/dt):start_step + int(window/dt) + T_pred, unit_indices]
+
+                step_mse[area][window] = ((predictions[area][window] - true_vals[area][window])**2).mean(axis=2)
+        
+        # -----------------------------------------------------
+        # pick and save selected_windows
+        # -----------------------------------------------------
+        selected_windows = {}
+        window_mses = {}
+
+        phases = ['pre', 'during', 'post']
+
+        for phase in phases:
+            slice_func = slice_funcs[phase]
+            selected_windows[phase] = {}
+            window_mses[phase] = {}
+            for area in step_mse.keys():
+                window_mses[phase][area] = [step_mse[area][window][slice_func(window), pred_steps - 1].mean() for window in windows]
+
+                asymptotic_value = np.array(window_mses[phase][area]).min()
+                for i in range(len(window_mses[phase][area])):
+                    if window_mses[phase][area][i]*pct_of_value <= asymptotic_value:
+                        selected_windows[phase][area] = windows[i]
+                        break
+        
+        window_selection_info = dict(
+            selected_windows=selected_windows,
+            step_mse=step_mse,
+            window_mses=window_mses
+        )
+        save(window_selection_info, os.path.join(window_selection_dir, f"{session}_selected_windows_phases_{pred_steps}_steps"))
+    
+    # -----------------------------------------------------
+    # LOAD AND COMPILE DATA
+    # -----------------------------------------------------
+
+    selected_windows = window_selection_info['selected_windows']
+
+    window_info = {}
+    for phase in selected_windows.keys():
+        for area, window in selected_windows[phase].items():
+            window = int(window) if window % 1 == 0 else window
+            if window not in window_info.keys():
+                window_info[window] = []
+            window_info[window].append((area, phase))
+
+    columns = ['explained_variance', 'A_mat', 'A_mat_with_bias', 'eigs',
+                'criticality_inds', 'sigma2_ML', 'AIC', 'sigma_norm', 'start_time',
+                    'start_ind', 'end_time', 'end_ind']
+            
+    VAR_results = {}
+    for area in selected_windows['pre'].keys():
+        VAR_results[area] = {col: [] for col in columns}
+
+
+    for window in window_info.keys():
+        stride = window
+        areas_to_load = np.unique([entry[0] for entry in window_info[window]])
+        VAR_results_dir = get_result_path(results_dir, session, window, stride)
+        
+        temp_results = {}
+        for area in areas_to_load:
+            print(f"Now attempting to load area {area} with window {window}")
+            try:
+                temp_results[area] = load(os.path.join(VAR_results_dir, area))
+            except IsADirectoryError:
+                print(f"Need to compile {os.path.join(VAR_results_dir, area)}")
+                # compile results
+                temp_results[area] = compile_folder(os.path.join(VAR_results_dir, area))
+        
+        for (area, phase) in window_info[window]:
+            for key in columns:
+                VAR_results[area][key].extend(temp_results[area][key].iloc[slice_funcs[phase](window)])
+            VAR_results
+
+    for area in VAR_results.keys():
+        VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
+        VAR_results[area]['window'] = VAR_results[area].apply(lambda row: row.end_time - row.start_time, axis=1)
+    
+    save(VAR_results, os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_phases_{pred_steps}_steps"))

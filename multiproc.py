@@ -7,6 +7,7 @@ import logging
 from neural_analysis.matIO import loadmat
 import numpy as np
 import queue
+import re
 from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
 from statsmodels.tsa import stattools
@@ -17,59 +18,68 @@ from tqdm.auto import tqdm
 import traceback
 
 sys.path.append('../..')
-from utils import load, save
+from utils import compile_folder, get_data_class, load, load_window_from_chunks, save
 
 def compute_VAR(window_data, unit_indices=None, PCA_dim=-1):
     if unit_indices is None:
-        chunk = window_data['data']
+        chunk = window_data
     else:
-        chunk = window_data['data'][:, unit_indices]
+        chunk = window_data[:, unit_indices]
     k = chunk.shape[0]
-    window_data['explained_variance'] = None
+
+    results = {}
+    results['explained_variance'] = None
     if PCA_dim > 0:
         if PCA_dim < 2:
             raise ValueError(f"PCA dimension must be greater than 1; provided value was {PCA_dim}")
         pca = PCA(n_components=PCA_dim)
         chunk = pca.fit_transform(chunk)
-        window_data['explained_variance'] = pca.explained_variance_ratio_
+        results['explained_variance'] = pca.explained_variance_ratio_
     
     model = VAR(chunk)
     VAR_results = model.fit(1)
-    window_data['A_mat'] = VAR_results.coefs[0]
-    window_data['A_mat_with_bias'] = VAR_results.params
+    results['A_mat'] = VAR_results.coefs[0]
+    results['A_mat_with_bias'] = VAR_results.params
     e,_ = np.linalg.eig(VAR_results.coefs[0])   
-    window_data['eigs'] = e   
-    window_data['criticality_inds'] = np.abs(e)
+    results['eigs'] = e   
+    results['criticality_inds'] = np.abs(e)
 
-    window_data['sigma2_ML'] = np.linalg.norm(VAR_results.endog[1:] - (VAR_results.endog_lagged @ VAR_results.params), axis=1).sum()/(k - 2)
-    window_data['AIC'] = k*np.log(window_data['sigma2_ML']) + 2
-    window_data['sigma_norm'] = np.linalg.norm(VAR_results.sigma_u, ord=2)
+    results['sigma2_ML'] = np.linalg.norm(VAR_results.endog[1:] - (VAR_results.endog_lagged @ VAR_results.params), axis=1).sum()/(k - 2)
+    results['AIC'] = k*np.log(results['sigma2_ML']) + 2
+    results['sigma_norm'] = np.linalg.norm(VAR_results.sigma_u, ord=2)
+
+    return results
 
 def compute_causality(window_data, p=1):
-    num_units = window_data['data'].shape[1]
-    window_data['causality'] = np.zeros((num_units, num_units))
+    num_units = window_data.shape[1]
+
+    results = {}
+    results['causality'] = np.zeros((num_units, num_units))
 
     lags = [p]
     for i in range(num_units):
         for j in range(num_units):
-            grangers = stattools.grangercausalitytests(window_data['data'][:, [j, i]], lags, verbose=False)
+            grangers = stattools.grangercausalitytests(window_data[:, [j, i]], lags, verbose=False)
             true_vals = grangers[p][1][0].model.data.endog
             restricted_preds = grangers[p][1][0].model.data.exog @ grangers[p][1][0].params
             unrestricted_preds = grangers[p][1][1].model.data.exog @ grangers[p][1][1].params
             restricted_error = true_vals - restricted_preds
             unrestricted_error = true_vals - unrestricted_preds
-            window_data['causality'][i, j] = np.log(np.var(restricted_error)/np.var(unrestricted_error))
+            results['causality'][i, j] = np.log(np.var(restricted_error)/np.var(unrestricted_error))
+    
+    return results
 
 def compute_correlations(window_data):
-    num_units = window_data['data'].shape[1]
-    window_data['correlations'] = np.zeros((num_units, num_units))
-    window_data['p_vals'] = np.zeros((num_units, num_units))
-    num_units = window_data['data'].shape[1]
+    results = {}
+    results['correlations'] = np.zeros((num_units, num_units))
+    results['p_vals'] = np.zeros((num_units, num_units))
+    num_units = window_data.shape[1]
 
     for i in range(num_units):
         for j in range(num_units):
-            window_data['correlations'][i, j], window_data['p_vals'][i, j] = pearsonr(window_data['data'][:, i], window_data['data'][:, j])
+            results['correlations'][i, j], results['p_vals'][i, j] = pearsonr(window_data[:, i], window_data[:, j])
 
+    return results
 
 def worker(worker_name, task_queue, message_queue=None, areas=None):
     if message_queue is not None:
@@ -78,35 +88,46 @@ def worker(worker_name, task_queue, message_queue=None, areas=None):
         try:
             # if message_queue is not None:
             #     message_queue.put((worker_name, "checking in", "DEBUG"))
-            file_path, results_dir, task_type = task_queue.get_nowait()
-            window_data = load(file_path)
+            window_start, window_end, directory, N, dt, results_dir, task_type = task_queue.get_nowait()
+            window_data = load_window_from_chunks(window_start, window_end, directory, N, dt)
             
+            window_name = f"window_start_{window_start}_end_{window_end}"
+
             if task_type == 'VAR':
                 for area in np.unique(areas):
-                    unit_indices = np.where(area == areas)
-                    area_window_data = window_data.copy()
-                    compute_VAR(area_window_data, unit_indices)
+                    unit_indices = np.where(area == areas)[0]
+                    results = compute_VAR(window_data, unit_indices)
 
-                    del area_window_data['data']
-                    save(area_window_data, os.path.join(results_dir, area, os.path.basename(file_path)))
+                    results['start_time'] = window_start
+                    results['start_ind'] = int(window_start/dt)
+                    results['end_time'] = window_end
+                    results['end_ind'] = int(window_end/dt)
+                    save(results, os.path.join(results_dir, area, window_name))
                 
-                compute_VAR(window_data)
-                del window_data['data']
-                save(window_data, os.path.join(results_dir, 'all', os.path.basename(file_path)))
+                results = compute_VAR(window_data)
+                results['start_time'] = window_start
+                results['start_ind'] = int(window_start/dt)
+                results['end_time'] = window_end
+                results['end_ind'] = int(window_end/dt)
+                save(results, os.path.join(results_dir, 'all', window_name))
 
             elif task_type == 'causality':
                 
-                compute_causality(window_data, p=1)
-
-                del window_data['data']
-                save(window_data, os.path.join(results_dir, os.path.basename(file_path)))
+                results = compute_causality(window_data, p=1)
+                results['start_time'] = window_start
+                results['start_ind'] = int(window_start/dt)
+                results['end_time'] = window_end
+                results['end_ind'] = int(window_end/dt)
+                save(results, os.path.join(results_dir, window_name))
 
             else: # task_type == 'correlations'
 
-                compute_correlations(window_data)
-                
-                del window_data['data']
-                save(window_data, os.path.join(results_dir, os.path.basename(file_path)))
+                results = compute_correlations(window_data)
+                results['start_time'] = window_start
+                results['start_ind'] = int(window_start/dt)
+                results['end_time'] = window_end
+                results['end_ind'] = int(window_end/dt)
+                save(results, os.path.join(results_dir, window_name))
 
             if message_queue is not None:
                 message_queue.put((worker_name, "task complete", "DEBUG"))
@@ -167,30 +188,44 @@ if __name__ == "__main__":
     logger.info(f"Now running {task_type} on session {session} with window = {window} and stride = {stride}")
 
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
-    for (dirpath, dirnames, filenames) in os.walk(all_data_dir):
-        if f"{session}.mat" in filenames:
-            data_class = os.path.basename(dirpath)
-            break
+    data_class = get_data_class(session, all_data_dir)
 
-    data_dir = os.path.join(all_data_dir, data_class, f"{session}_window_{window}_stride_{stride}")
-    if not os.path.exists(data_dir):
-        raise ValueError(f"The directory {session}_window_{window}_stride_{stride} cannot be found in the appropriate place. Please evaluate, or split up the data as needed.")
+    regex = re.compile(f"{session}_lfp_chunked_.*")
+    data_dir = None
+    chunk_time = np.Inf
+    for f in os.listdir(os.path.join(all_data_dir, data_class)):
+        if regex.match(f):
+            if int(f.split('_')[-1][:-1]) < chunk_time:
+                data_dir = os.path.join(all_data_dir, data_class, f)
+                chunk_time = int(f.split('_')[-1][:-1])
+    if data_dir is None:
+        raise ValueError(f"The session {session} has not been chunked. Please evaluate, or split up the data as needed.")
+    else:
+        logger.info(f"Data located: using chunks of size {chunk_time} seconds")
+
     results_dir =  f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/{task_type}/{task_type}_{session}_window_{window}_stride_{stride}_{timestamp}"
     os.makedirs(results_dir, exist_ok=True)
 
     if task_type == 'VAR':
         electrode_info = loadmat(os.path.join(all_data_dir, data_class, f"{session}.mat"), variables=['electrodeInfo'], verbose=False)
         areas = electrode_info['area']
-        for area in areas:
+        for area in np.unique(areas):
             os.makedirs(os.path.join(results_dir, area), exist_ok=True)
         os.makedirs(os.path.join(results_dir, 'all'), exist_ok=True)
 
     logger.info(f"Now running {task_type}. Results will be saved to {results_dir}.")
 
-    files = os.listdir(data_dir)
+    directory = load(os.path.join(data_dir, 'directory'))
+    lfp_schema = loadmat(os.path.join(all_data_dir, data_class, f"{session}.mat"), variables=['lfpSchema'], verbose=False)
+    T = len(lfp_schema['index'][0])
+    N = len(lfp_schema['index'][1])
+    dt = lfp_schema['smpInterval'][0]
+    num_windows = int(np.floor((T-int(window/dt))/int(stride/dt))+1)
 
-    for file in files:
-        task_queue.put((os.path.join(data_dir, file), results_dir, task_type))
+    for i in range(num_windows):
+        window_start = i*stride
+        window_end = i*stride + window
+        task_queue.put((window_start, window_end, directory, N, dt, results_dir, task_type))
 
     logger.info(f"Queue Size: {task_queue.qsize()}")
     
@@ -205,7 +240,7 @@ if __name__ == "__main__":
         proc.start()
 
     killed_workers = 0
-    iterator = tqdm(total=len(files))
+    iterator = tqdm(total=num_windows)
     while True:
         try:
             worker_name, message, log_level = message_queue.get_nowait()
@@ -228,4 +263,17 @@ if __name__ == "__main__":
     for proc in processes:
         proc.join()
     
-    logger.info("Multiprocessing complete...")
+    logger.info("Multiprocessing complete !!!")
+
+    logger.info("Compiling results...")
+
+    if task_type == 'VAR':
+        for folder_name in tqdm(os.listdir(results_dir)):
+            logger.info(f"Compiling {os.path.join(results_dir, folder_name)}")
+            # compile results
+            compile_folder(os.path.join(results_dir, folder_name))
+    else:
+        logger.info(f"Compiling {results_dir}")
+        compile_folder(results_dir)
+
+    logger.info("Compiling complete !!!")
