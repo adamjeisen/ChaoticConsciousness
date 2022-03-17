@@ -244,11 +244,17 @@ def get_data_class(session, all_data_dir):
 
     return data_class
 
-def get_result_path(results_dir, session, window, stride=None):
+def get_result_path(results_dir, session, window, stride=None, bandpass_info=None):
     if stride is None:
         stride = window
     
-    file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}"
+    if bandpass_info is None:
+        file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}_" + "[a-zA-Z]{3}-" 
+    else:
+        if bandpass_info['flag']:
+            file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}_bandpass"
+        else:
+            file_template = f"{os.path.basename(results_dir)}_{session}_window_{window}_stride_{stride}_" + "[a-zA-Z]{3}-"
     regex = re.compile(file_template)
 
     matching_files = []
@@ -258,96 +264,19 @@ def get_result_path(results_dir, session, window, stride=None):
     
     # pick the most recent result, if there are multiple
     if len(matching_files) == 1:
-        file = matching_files[0]
+        filename = matching_files[0]
     else:
-        file = None
+        filename = None
         date = datetime(1996, 11, 8)
         for test_file in matching_files:
             test_date = datetime.strptime('_'.join(test_file.split('_')[-2:]), '%b-%d-%Y_%H%M')
             if test_date > date:
-                file = test_file
+                filename = test_file
                 date = test_date
-    if file is None:
+    if filename is None:
         raise ValueError(f"File starting with {file_template} not found.")
     
-    return os.path.join(results_dir, file)
-
-def get_optimal_VAR_results(session, data_class, session_info):
-    VAR_all_results_dir = f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/VAR"
-    regex = re.compile(f"{session}_selected_windows_phase")
-    matches = []
-    for file in os.listdir(VAR_all_results_dir):
-        if regex.match(file):
-            matches.append(file)
-
-    if len(matches) == 0:
-        print(f"Window selection hasn't been run for session {session}")
-    elif len(matches) == 1:
-        path_to_file = os.path.join(VAR_all_results_dir, matches[0])
-        print(f"Loading file {path_to_file}")
-        selected_windows = load(path_to_file)
-    else:
-        steps = [int(file.split('_')[-2]) for file in matches]
-        print(f"Selected windows are available for the following forward-step predictions (number of steps): \n{steps}")
-        print("Which one would you like to use?")
-        chosen_steps = input()
-        chosen_steps = int(chosen_steps)
-        ind = np.where(np.array(steps) == chosen_steps)[0]
-        if len(ind) == 0:
-            print(f"{chosen_steps} steps is not an option, try again")
-            selected_windows = None
-        else:
-            ind = ind[0]
-            path_to_file = os.path.join(VAR_all_results_dir, matches[ind])
-            print(f"Loading file {path_to_file}")
-            selected_windows = load(path_to_file)
-    
-    slice_funcs = dict(
-        pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
-        during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
-        post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
-    )
-
-    window_info = {}
-    for phase in selected_windows.keys():
-        for area, window in selected_windows[phase].items():
-            window = int(window) if window % 1 == 0 else window
-            if window not in window_info.keys():
-                window_info[window] = []
-            window_info[window].append((area, phase))
-
-    VAR_results = {}
-    for area in selected_windows['pre'].keys():
-        if area == 'all':
-            VAR_results[area] = {'start_time': [], 'criticality_inds': [], 'A_mat': []}
-        else:
-            VAR_results[area] = {'start_time': [], 'criticality_inds': []}
-
-    for window in window_info.keys():
-        stride = window
-        areas_to_load = np.unique([entry[0] for entry in window_info[window]])
-        VAR_results_dir = get_result_path(VAR_all_results_dir, session, window, stride)
-        
-        temp_results = {}
-        for area in areas_to_load:
-            print(f"Now attempting to load area {area} with window {window}")
-            try:
-                temp_results[area] = load(os.path.join(VAR_results_dir, area))
-            except IsADirectoryError:
-                print(f"Need to compile {os.path.join(VAR_results_dir, area)}")
-                # compile results
-                temp_results[area] = compile_folder(os.path.join(VAR_results_dir, area))
-        
-        for (area, phase) in window_info[window]:
-            VAR_results[area]['criticality_inds'].extend(temp_results[area]['criticality_inds'].iloc[slice_funcs[phase](window)])
-            VAR_results[area]['start_time'].extend(temp_results[area]['start_time'].iloc[slice_funcs[phase](window)])
-            if area == 'all':
-                VAR_results[area]['A_mat'].extend(temp_results[area]['A_mat'].iloc[slice_funcs[phase](window)])
-    
-    for area in VAR_results.keys():
-        VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
-    
-    return VAR_results
+    return os.path.join(results_dir, filename)
 
 def save_lfp_chunks(session, all_data_dir, chunk_time_s=4*60):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
@@ -422,7 +351,7 @@ def load_window_from_chunks(window_start, window_end, directory, N, dt):
     
     return window_data
 
-def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
+def run_window_selection(session, bandpass_info=None, pred_steps=10, pct_of_value=0.95):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     data_class = get_data_class(session, all_data_dir)
 
@@ -435,7 +364,13 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
     window_selection_dir = os.path.join(results_dir, 'window_selection')
     os.makedirs(window_selection_dir, exist_ok=True)
 
-    regex = re.compile(f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
+    if bandpass_info is None:
+        regex = re.compile(f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
+    else:
+        if bandpass_info['flag']:
+            regex = re.compile(f"VAR_{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+        else:
+            regex = re.compile(f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
 
     VAR_results = None
     for file_name in os.listdir(window_selection_dir):
@@ -448,7 +383,14 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
     # check if session has already computed selected windows
     # (note that this does not check if more windows have been added since the last computation)
     # -----------------------------------------------------
-    regex = re.compile(f"{session}_selected_windows_phases_{pred_steps}_steps")
+    if bandpass_info is None:
+        regex = re.compile(f"{session}_selected_windows_phases_{pred_steps}_steps")
+    else:
+        if bandpass_info['flag']:
+            regex = re.compile(f"{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+        else:
+            regex = re.compile(f"{session}_selected_windows_phases_{pred_steps}_steps")
+    
 
     window_selection_info = None
     for file_name in os.listdir(window_selection_dir):
@@ -471,12 +413,16 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
     # -----------------------------------------------------
     filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
     session_info = loadmat(filename, variables=['sessionInfo'], verbose=False)
-    slice_funcs = dict(
+    if data_class == 'propofolPuffTone':
+        slice_funcs = dict(
             pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
             during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
             post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
-    )
-
+        )
+    elif data_class == 'leverOddball':
+        slice_funcs = dict(
+            whole=lambda window: slice(0, -1)
+        )
     # -----------------------------------------------------
     # RUN WINDOW SELECTION
     # -----------------------------------------------------
@@ -491,13 +437,31 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
         dt = lfp_schema['smpInterval'][0]
         print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
 
+        if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
+            electrode_info['area'] = np.delete(electrode_info['area'], np.where(np.arange(len(electrode_info['area'])) == 60))
+
+        # find completed windows 
+        # TODO: account for the specific bandpass frequencies
         windows = []
-        regex = re.compile(f"VAR_{session}_window_" + ".{1,}_stride_.{1,}_.*")
+        if bandpass_info is None:
+            regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
+        else:
+            if bandpass_info['flag']:
+                regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_bandpass")
+            else:
+                regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
+
         for file_name in os.listdir(results_dir):
             if regex.match(file_name):
-                windows.append(float(file_name.split('_')[3]))
+                if bandpass_info is None:
+                    windows.append(float(file_name.split('_')[-3]))
+                else:
+                    if bandpass_info['flag']:
+                        windows.append(float(file_name.split('_')[-7]))
+                    else:
+                        windows.append(float(file_name.split('_')[-3]))
         windows.sort()
-        windows = [int(w) if w % 1 == 0 else w for w in windows]
+        windows = [int(w) if w % 1 == 0 else w for w in np.unique(windows)]
 
         # -----------------------------------------------------
         # compute forward predictions
@@ -520,15 +484,15 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
         for window in windows:
             stride = window
             print(f"Now computing window = {window}")
-            VAR_results_dir = get_result_path(results_dir, session, window, stride)
+            VAR_results_dir = get_result_path(results_dir, session, window, stride, bandpass_info=bandpass_info)
             VAR_results = {}
-            for file in tqdm(os.listdir(VAR_results_dir)):
+            for file_name in tqdm(os.listdir(VAR_results_dir)):
                 try:
-                    VAR_results[file] = load(os.path.join(VAR_results_dir, file))
+                    VAR_results[file_name] = load(os.path.join(VAR_results_dir, file_name))
                 except IsADirectoryError:
-                    print(f"Need to compile {os.path.join(VAR_results_dir, file)}")
+                    print(f"Need to compile {os.path.join(VAR_results_dir, file_name)}")
                     # compile results
-                    VAR_results[file] = compile_folder(os.path.join(VAR_results_dir, file))
+                    VAR_results[file_name] = compile_folder(os.path.join(VAR_results_dir, file_name))
             
             for area in VAR_results.keys():
                 if area == 'all':
@@ -536,19 +500,20 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
                 else:
                     unit_indices = np.where(electrode_info['area'] == area)[0]
                 
-                predictions[area][window] = np.zeros((len(VAR_results[area]), T_pred, len(unit_indices)))
+                predictions[area][window] = np.zeros((len(VAR_results[area]) - 1, T_pred, len(unit_indices)))
                 true_vals[area][window] = np.zeros(predictions[area][window].shape)
 
                 for i in tqdm(range(predictions[area][window].shape[0])):
                     row = VAR_results[area].iloc[i]
                     start_step = int(stride*i/dt)
-                    x0 = lfp[start_step + int(window/dt) - 1, unit_indices]
+                    # x0 = lfp[start_step + int(window/dt) - 1, unit_indices]
 
                     for t in range(T_pred):
-                        if t == 0:
-                            predictions[area][window][i, t] = np.hstack([[1], x0]) @ row.A_mat_with_bias
-                        else:
-                            predictions[area][window][i, t] = np.hstack([[1], predictions[area][window][i, t - 1]]) @ row.A_mat_with_bias
+                        predictions[area][window][i, t] = np.hstack([[1], lfp[start_step + int(window/dt) - 1 + t, unit_indices]]) @ row.A_mat_with_bias
+                        # if t == 0:
+                        #     predictions[area][window][i, t] = np.hstack([[1], x0]) @ row.A_mat_with_bias
+                        # else:
+                        #     predictions[area][window][i, t] = np.hstack([[1], predictions[area][window][i, t - 1]]) @ row.A_mat_with_bias
 
                     true_vals[area][window][i] = lfp[start_step + int(window/dt):start_step + int(window/dt) + T_pred, unit_indices]
 
@@ -560,7 +525,7 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
         selected_windows = {}
         window_mses = {}
 
-        phases = ['pre', 'during', 'post']
+        phases = slice_funcs.keys()
 
         for phase in phases:
             slice_func = slice_funcs[phase]
@@ -570,8 +535,9 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
                 window_mses[phase][area] = [step_mse[area][window][slice_func(window), pred_steps - 1].mean() for window in windows]
 
                 asymptotic_value = np.array(window_mses[phase][area]).min()
+                asymptotic_ind = np.argmin(window_mses[phase][area])
                 for i in range(len(window_mses[phase][area])):
-                    if window_mses[phase][area][i]*pct_of_value <= asymptotic_value:
+                    if window_mses[phase][area][i]*pct_of_value <= asymptotic_value or i == asymptotic_ind:
                         selected_windows[phase][area] = windows[i]
                         break
         
@@ -580,7 +546,12 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
             step_mse=step_mse,
             window_mses=window_mses
         )
-        save(window_selection_info, os.path.join(window_selection_dir, f"{session}_selected_windows_phases_{pred_steps}_steps"))
+
+        save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_phases_{pred_steps}_steps")
+        if bandpass_info is not None:
+            if bandpass_info['flag']:
+                save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+        save(window_selection_info, save_file_path)
     
     # -----------------------------------------------------
     # LOAD AND COMPILE DATA
@@ -601,7 +572,8 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
                     'start_ind', 'end_time', 'end_ind']
             
     VAR_results = {}
-    for area in selected_windows['pre'].keys():
+    key = list(selected_windows.keys())[0]
+    for area in selected_windows[key].keys():
         VAR_results[area] = {col: [] for col in columns}
 
 
@@ -629,4 +601,11 @@ def run_window_selection(session, pred_steps=10, pct_of_value=0.95):
         VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
         VAR_results[area]['window'] = VAR_results[area].apply(lambda row: row.end_time - row.start_time, axis=1)
     
-    save(VAR_results, os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_phases_{pred_steps}_steps"))
+    save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
+    if bandpass_info is not None:
+        if bandpass_info['flag']:
+            save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+
+    save(VAR_results, save_file_path)
+
+    return VAR_results, window_selection_info

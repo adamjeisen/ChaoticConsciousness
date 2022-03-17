@@ -8,6 +8,7 @@ from neural_analysis.matIO import loadmat
 import numpy as np
 import queue
 import re
+from scipy.signal import butter, lfilter
 from scipy.stats import pearsonr
 from sklearn.decomposition import PCA
 from statsmodels.tsa import stattools
@@ -19,6 +20,14 @@ import traceback
 
 sys.path.append('../..')
 from utils import compile_folder, get_data_class, load, load_window_from_chunks, save
+
+def butter_bandpass(lowcut, highcut, fs, order=5):
+    return butter(order, [lowcut, highcut], fs=fs, btype='band')
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
+    b, a = butter_bandpass(lowcut, highcut, fs, order=order)
+    y = lfilter(b, a, data)
+    return y
 
 def compute_VAR(window_data, unit_indices=None, PCA_dim=-1):
     if unit_indices is None:
@@ -70,6 +79,8 @@ def compute_causality(window_data, p=1):
     return results
 
 def compute_correlations(window_data):
+    num_units = window_data.shape[1]
+
     results = {}
     results['correlations'] = np.zeros((num_units, num_units))
     results['p_vals'] = np.zeros((num_units, num_units))
@@ -81,7 +92,7 @@ def compute_correlations(window_data):
 
     return results
 
-def worker(worker_name, task_queue, message_queue=None, areas=None):
+def worker(worker_name, task_queue, bandpass_info, message_queue=None, areas=None):
     if message_queue is not None:
         message_queue.put((worker_name, "starting up !!", "INFO"))
     while True:
@@ -90,6 +101,8 @@ def worker(worker_name, task_queue, message_queue=None, areas=None):
             #     message_queue.put((worker_name, "checking in", "DEBUG"))
             window_start, window_end, directory, N, dt, results_dir, task_type = task_queue.get_nowait()
             window_data = load_window_from_chunks(window_start, window_end, directory, N, dt)
+            if bandpass_info['flag']:
+                window_data = butter_bandpass_filter(window_data, bandpass_info['low'], bandpass_info['high'], 1/dt)
             
             window_name = f"window_start_{window_start}_end_{window_end}"
 
@@ -165,6 +178,7 @@ if __name__ == "__main__":
     parser.add_argument('--window', '-w', help='Window length in seconds to use for analysis. Defaults to 2.5.', default=2.5, type=float)
     parser.add_argument('--stride', '-s', help='Stride length in seconds to use for analysis. Defaults to 2.5.', default=2.5, type=float)
     parser.add_argument('--task_type', '-t', help="The task type to run - either 'VAR', 'causality' or 'correlations'.", default='VAR', type=str)
+    parser.add_argument('--bandpass', '-b', nargs="*", help="Whether to bandpass filter the data before processing.", type=float)
 
     args = parser.parse_args()
 
@@ -179,6 +193,19 @@ if __name__ == "__main__":
         stride = int(stride)
     
     task_type = args.task_type
+
+    if args.bandpass is None:
+        bandpass_info = dict(
+            flag=False, 
+            low=None, 
+            high=None
+        )
+    else:
+        bandpass_info = dict(
+            flag=True,
+            low=args.bandpass[0],
+            high=args.bandpass[1]
+        )
 
     if session is None:
         raise ValueError("Session must be provided! For instance: 'Mary-Anesthesia-20160809-01'")
@@ -203,11 +230,16 @@ if __name__ == "__main__":
     else:
         logger.info(f"Data located: using chunks of size {chunk_time} seconds")
 
-    results_dir =  f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/{task_type}/{task_type}_{session}_window_{window}_stride_{stride}_{timestamp}"
+    if bandpass_info['flag']:
+        results_dir =  f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/{task_type}/{task_type}_{session}_window_{window}_stride_{stride}_bandpass_{bandpass_info['low']}-{bandpass_info['high']}_{timestamp}"
+    else:
+        results_dir =  f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/{task_type}/{task_type}_{session}_window_{window}_stride_{stride}_{timestamp}"
     os.makedirs(results_dir, exist_ok=True)
 
     if task_type == 'VAR':
         electrode_info = loadmat(os.path.join(all_data_dir, data_class, f"{session}.mat"), variables=['electrodeInfo'], verbose=False)
+        if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
+            electrode_info['area'] = np.delete(electrode_info['area'], np.where(np.arange(len(electrode_info['area'])) == 60))
         areas = electrode_info['area']
         for area in np.unique(areas):
             os.makedirs(os.path.join(results_dir, area), exist_ok=True)
@@ -233,9 +265,9 @@ if __name__ == "__main__":
     num_workers = 31
     for i in range(num_workers):
         if task_type == 'VAR':
-            proc = mp.Process(target=worker, args=(f"worker {i}", task_queue, message_queue, areas))
+            proc = mp.Process(target=worker, args=(f"worker {i}", task_queue, bandpass_info, message_queue, areas))
         else:
-            proc = mp.Process(target=worker, args=(f"worker {i}", task_queue, message_queue))
+            proc = mp.Process(target=worker, args=(f"worker {i}", task_queue, bandpass_info, message_queue))
         processes.append(proc)
         proc.start()
 

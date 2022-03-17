@@ -6,8 +6,10 @@ def plot_individual_areas(session, data_class, VAR_results, session_info, save_p
     # SET UP AREAS AND START/END INDICES
     if data_class == 'propofolPuffTone':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0')]
-    else:
+    elif data_class == 'propofolWakeup':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0'), ('Thal', 'midnightblue')]
+    elif data_class == 'leverOddball':
+        area_colors_all = [('dlPFC', 'lightsteelblue'), ('vlPFC', 'C0')]
 
     area_colors = []
     for area, c in area_colors_all:
@@ -37,6 +39,8 @@ def plot_individual_areas(session, data_class, VAR_results, session_info, save_p
         criticality_inds = criticality_inds[start_ind:end_ind]
         individual_criticalities[area] = criticality_inds
         ax.plot(start_times, criticality_inds, label=area, c=c)
+        std_error = VAR_results[area].criticality_inds.apply(lambda x: x.std()/np.sqrt(len(x)))[start_ind:end_ind]
+        ax.fill_between(start_times, criticality_inds - std_error, criticality_inds + std_error, color='red', alpha=0.2)
 
         if criticality_inds.min() < min_val:
             min_val = criticality_inds.min()
@@ -79,8 +83,10 @@ def plot_multipopulation(session, data_class, VAR_results, session_info, electro
     # SET UP AREAS AND START/END INDICES
     if data_class == 'propofolPuffTone':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0')]
-    else:
+    elif data_class == 'propofolWakeup':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0'), ('Thal', 'midnightblue')]
+    elif data_class == 'leverOddball':
+        area_colors_all = [('dlPFC', 'lightsteelblue'), ('vlPFC', 'C0')]
 
     area_colors = []
     for area, c in area_colors_all:
@@ -108,14 +114,18 @@ def plot_multipopulation(session, data_class, VAR_results, session_info, electro
         unit_indices = np.where(electrode_info['area'] == area)[0]
 
         criticality_inds = np.zeros(len(VAR_results['all']))
+        std_error = np.zeros(len(VAR_results['all']))
         for i in range(len(criticality_inds)):
             e, _ = np.linalg.eig(VAR_results['all'].A_mat.iloc[i][unit_indices][:, unit_indices])
             criticality_inds[i] = np.abs(e).mean()
+            std_error[i] = np.abs(e).std()/np.sqrt(len(e))
         
         start_times = start_times[start_ind:end_ind]
         criticality_inds = criticality_inds[start_ind:end_ind]
         multipop_criticalities[area] = criticality_inds
         ax.plot(start_times, criticality_inds, label=area, c=c)
+        std_error = std_error[start_ind:end_ind]
+        ax.fill_between(start_times, criticality_inds - std_error, criticality_inds + std_error, color='red', alpha=0.2)
 
         if criticality_inds.min() < min_val:
             min_val = criticality_inds.min()
