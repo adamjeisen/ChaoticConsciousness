@@ -2,14 +2,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-def plot_individual_areas(session, data_class, VAR_results, session_info, save_path=None, start_time=None, end_time=None, return_criticalities=False):
+def plot_individual_areas(session, data_class, VAR_results, session_info, trial_info=None, save_path=None, start_time=None, end_time=None, return_criticalities=False):
     # SET UP AREAS AND START/END INDICES
     if data_class == 'propofolPuffTone':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0')]
+        # area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray')]
     elif data_class == 'propofolWakeup':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0'), ('Thal', 'midnightblue')]
     elif data_class == 'leverOddball':
-        area_colors_all = [('dlPFC', 'lightsteelblue'), ('vlPFC', 'C0')]
+        area_colors_all = [('dlPFC-R', 'lightsteelblue'), ('dlPFC-L', 'slategray'), ('vlPFC-R', 'skyblue'), ('vlPFC-L', 'C0')]
 
     area_colors = []
     for area, c in area_colors_all:
@@ -40,7 +41,7 @@ def plot_individual_areas(session, data_class, VAR_results, session_info, save_p
         individual_criticalities[area] = criticality_inds
         ax.plot(start_times, criticality_inds, label=area, c=c)
         std_error = VAR_results[area].criticality_inds.apply(lambda x: x.std()/np.sqrt(len(x)))[start_ind:end_ind]
-        ax.fill_between(start_times, criticality_inds - std_error, criticality_inds + std_error, color='red', alpha=0.2)
+        ax.fill_between(start_times, criticality_inds - std_error, criticality_inds + std_error, color=c, alpha=0.2)
 
         if criticality_inds.min() < min_val:
             min_val = criticality_inds.min()
@@ -61,7 +62,15 @@ def plot_individual_areas(session, data_class, VAR_results, session_info, save_p
         for i in range(len(session_info['drugStart'])):
             ax.fill_between(np.arange(session_info['drugStart'][i], session_info['drugEnd'][i])/60, 
                                         min_val, max_val, color=colors[i], alpha=0.2, label=f"drug infusion 1 ({session_info['drug'][i]})")
-    
+    elif data_class == 'leverOddball':
+        plt.axvline(session_info['infusionStarts']/60, c='plum', linestyle='--', label='infusion')
+        if trial_info is None:
+            raise ValueError("leverOddball requires trial info to plot lever press times")
+        lever_times = trial_info['trialStart'][trial_info['task'] == 'lever']
+        response = 1 - trial_info['noResponse']
+        lever_press_times = lever_times[response == 1]
+        plt.scatter(lever_press_times/60, response[response==1]*plt.gca().get_ylim()[1], c='k', label='lever press')
+
     ax.legend(fontsize=14)        
     # fig.text(0.52, -0.02, 'Time (min)', ha='center', fontsize=16)
     ax.set_ylabel('Mean Criticality Index', fontsize=16)
@@ -86,7 +95,7 @@ def plot_multipopulation(session, data_class, VAR_results, session_info, electro
     elif data_class == 'propofolWakeup':
         area_colors_all = [('CPB', 'lightsteelblue'), ('7b', 'slategray'), ('FEF', 'skyblue'), ('vlPFC', 'C0'), ('Thal', 'midnightblue')]
     elif data_class == 'leverOddball':
-        area_colors_all = [('dlPFC', 'lightsteelblue'), ('vlPFC', 'C0')]
+        area_colors_all = [('dlPFC-R', 'lightsteelblue'), ('dlPFC-L', 'slategray'), ('vlPFC-R', 'skyblue'), ('vlPFC-L', 'C0')]
 
     area_colors = []
     for area, c in area_colors_all:

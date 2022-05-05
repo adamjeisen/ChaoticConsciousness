@@ -19,7 +19,7 @@ from tqdm.auto import tqdm
 import traceback
 
 sys.path.append('../..')
-from utils import compile_folder, get_data_class, load, load_window_from_chunks, save
+from utils import compile_folder, get_data_class, load, load_session_data, load_window_from_chunks, save
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
     return butter(order, [lowcut, highcut], fs=fs, btype='band')
@@ -236,22 +236,19 @@ if __name__ == "__main__":
         results_dir =  f"/om/user/eisenaj/ChaoticConsciousness/results/{data_class}/{task_type}/{task_type}_{session}_window_{window}_stride_{stride}_{timestamp}"
     os.makedirs(results_dir, exist_ok=True)
 
-    if task_type == 'VAR':
-        electrode_info = loadmat(os.path.join(all_data_dir, data_class, f"{session}.mat"), variables=['electrodeInfo'], verbose=False)
-        if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
-            electrode_info['area'] = np.delete(electrode_info['area'], np.where(np.arange(len(electrode_info['area'])) == 60))
-        areas = electrode_info['area']
-        for area in np.unique(areas):
-            os.makedirs(os.path.join(results_dir, area), exist_ok=True)
-        os.makedirs(os.path.join(results_dir, 'all'), exist_ok=True)
-
     logger.info(f"Now running {task_type}. Results will be saved to {results_dir}.")
 
     directory = load(os.path.join(data_dir, 'directory'))
-    lfp_schema = loadmat(os.path.join(all_data_dir, data_class, f"{session}.mat"), variables=['lfpSchema'], verbose=False)
-    T = len(lfp_schema['index'][0])
-    N = len(lfp_schema['index'][1])
-    dt = lfp_schema['smpInterval'][0]
+
+    variables = ['electrodeInfo', 'lfpSchema']
+    session_vars, T, N, dt = load_session_data(session, all_data_dir, variables, data_class=data_class)
+    electrode_info, lfp_schema = session_vars['electrodeInfo'], session_vars['lfpSchema']
+
+    areas = electrode_info['area']
+    for area in np.unique(areas):
+        os.makedirs(os.path.join(results_dir, area), exist_ok=True)
+    os.makedirs(os.path.join(results_dir, 'all'), exist_ok=True)
+
     num_windows = int(np.floor((T-int(window/dt))/int(stride/dt))+1)
 
     for i in range(num_windows):

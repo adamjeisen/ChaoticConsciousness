@@ -6,9 +6,12 @@ import os
 import pandas as pd
 import pickle
 import re
+import scipy
 import shutil
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 import time
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 
 # ===========================
 # HDF5 UTILS
@@ -351,7 +354,37 @@ def load_window_from_chunks(window_start, window_end, directory, N, dt):
     
     return window_data
 
-def run_window_selection(session, bandpass_info=None, pred_steps=10, pct_of_value=0.95):
+def load_session_data(session, all_data_dir, variables, data_class=None, verbose=True):   
+    if data_class is None:
+        data_class = get_data_class(session, all_data_dir)
+    
+    filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
+
+    start = time.process_time()
+    if 'lfpSchema' not in variables:
+        variables.append('lfpSchema')
+
+    if verbose:
+        print(f"Loading data: {variables}...")
+    start = time.process_time()
+    session_vars = {}
+    for arg in variables:
+        session_vars[arg] = loadmat(filename, variables=[arg], verbose=False)
+    if verbose:
+        print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
+
+    if 'electrodeInfo' in variables:
+        if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
+            session_vars['electrodeInfo']['area'] = np.delete(session_vars['electrodeInfo']['area'], np.where(np.arange(len(session_vars['electrodeInfo']['area'])) == 60))
+        elif data_class == 'leverOddball':
+            session_vars['electrodeInfo']['area'] = np.array([f"{area}-{h[0].upper()}" for area, h in zip(session_vars['electrodeInfo']['area'], session_vars['electrodeInfo']['hemisphere'])])
+    T = len(session_vars['lfpSchema']['index'][0])
+    N = len(session_vars['lfpSchema']['index'][1])
+    dt = session_vars['lfpSchema']['smpInterval'][0]
+
+    return session_vars, T, N, dt
+
+def run_window_selection(session, pred_steps=10, pct_of_value=0.95, return_data=False, bandpass_info=None, verbose=True):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     data_class = get_data_class(session, all_data_dir)
 
@@ -372,11 +405,12 @@ def run_window_selection(session, bandpass_info=None, pred_steps=10, pct_of_valu
         else:
             regex = re.compile(f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
 
-    VAR_results = None
+    VAR_results_path = None
     for file_name in os.listdir(window_selection_dir):
         if regex.match(file_name):
-            VAR_results = load(os.path.join(window_selection_dir, file_name))
-            print(f"VAR results with selected windows found for session {session}.")
+            VAR_results_path = os.path.join(window_selection_dir, file_name)
+            if verbose:
+                print(f"VAR results with selected windows found for session {session}.")
             break
     
     # -----------------------------------------------------
@@ -392,220 +426,309 @@ def run_window_selection(session, bandpass_info=None, pred_steps=10, pct_of_valu
             regex = re.compile(f"{session}_selected_windows_phases_{pred_steps}_steps")
     
 
-    window_selection_info = None
+    window_selection_info_path = None
     for file_name in os.listdir(window_selection_dir):
         if regex.match(file_name):
-            window_selection_info = load(os.path.join(window_selection_dir, file_name))
-            print(f"Window selection info found for session {session}.")
+            window_selection_info_path = os.path.join(window_selection_dir, file_name)
+            if verbose:
+                print(f"Window selection info found for session {session}.")
             break
 
-    if VAR_results is not None:
+    if VAR_results_path is not None:
         
-        if window_selection_info is None:
-            print("Even though results were found, couldn't find window selection info.")
-
-        return VAR_results, window_selection_info
-
-    # ONLY RUNS THIS IF VAR RESULTS NOT FOUND:
-
-    # -----------------------------------------------------
-    # make slice function
-    # -----------------------------------------------------
-    filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
-    session_info = loadmat(filename, variables=['sessionInfo'], verbose=False)
-    if data_class == 'propofolPuffTone':
-        slice_funcs = dict(
-            pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
-            during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
-            post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
-        )
-    elif data_class == 'leverOddball':
-        slice_funcs = dict(
-            whole=lambda window: slice(0, -1)
-        )
-    # -----------------------------------------------------
-    # RUN WINDOW SELECTION
-    # -----------------------------------------------------
-    if window_selection_info is None:
-        print(f"Session {session}: selected windows by phase with {pred_steps}-step prediction not found. Running now.")
-        
-        print("Loading data ...")
-        start = time.process_time()
-        electrode_info, lfp, lfp_schema = loadmat(filename, variables=['electrodeInfo', 'lfp', 'lfpSchema'], verbose=False)
-        T = len(lfp_schema['index'][0])
-        N = len(lfp_schema['index'][1])
-        dt = lfp_schema['smpInterval'][0]
-        print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
-
-        if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
-            electrode_info['area'] = np.delete(electrode_info['area'], np.where(np.arange(len(electrode_info['area'])) == 60))
-
-        # find completed windows 
-        # TODO: account for the specific bandpass frequencies
-        windows = []
-        if bandpass_info is None:
-            regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
+        if window_selection_info_path is None:
+            if verbose:
+                print("Even though results were found, couldn't find window selection info.")
+            if return_data:
+                return load(VAR_results_path), None
         else:
-            if bandpass_info['flag']:
-                regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_bandpass")
-            else:
-                regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
+            if return_data:
+                return load(VAR_results_path), load(window_selection_info_path)
 
-        for file_name in os.listdir(results_dir):
-            if regex.match(file_name):
-                if bandpass_info is None:
-                    windows.append(float(file_name.split('_')[-3]))
-                else:
-                    if bandpass_info['flag']:
-                        windows.append(float(file_name.split('_')[-7]))
-                    else:
-                        windows.append(float(file_name.split('_')[-3]))
-        windows.sort()
-        windows = [int(w) if w % 1 == 0 else w for w in np.unique(windows)]
+    else: # ONLY RUNS THIS IF VAR RESULTS NOT FOUND:
 
         # -----------------------------------------------------
-        # compute forward predictions
-        # (note that this assumes window and stride are the same)
+        # make slice function
         # -----------------------------------------------------
-
-        T_pred = pred_steps
-
-        predictions = {}
-        true_vals = {}
-        step_mse = {}
-        for area in np.unique(electrode_info['area']):
-            predictions[area] = {}
-            true_vals[area] = {}
-            step_mse[area] = {}
-        predictions['all'] = {}
-        true_vals['all'] = {}
-        step_mse['all'] = {}
-
-        for window in windows:
-            stride = window
-            print(f"Now computing window = {window}")
-            VAR_results_dir = get_result_path(results_dir, session, window, stride, bandpass_info=bandpass_info)
-            VAR_results = {}
-            for file_name in tqdm(os.listdir(VAR_results_dir)):
-                try:
-                    VAR_results[file_name] = load(os.path.join(VAR_results_dir, file_name))
-                except IsADirectoryError:
-                    print(f"Need to compile {os.path.join(VAR_results_dir, file_name)}")
-                    # compile results
-                    VAR_results[file_name] = compile_folder(os.path.join(VAR_results_dir, file_name))
+        filename = os.path.join(all_data_dir, data_class, f'{session}.mat')
+        session_info = loadmat(filename, variables=['sessionInfo'], verbose=False)
+        if data_class == 'propofolPuffTone':
             
-            for area in VAR_results.keys():
-                if area == 'all':
-                    unit_indices = np.arange(len(electrode_info['area']))
-                else:
-                    unit_indices = np.where(electrode_info['area'] == area)[0]
+            # slice_funcs = dict(
+            #     pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
+            #     during=lambda window: slice(int(session_info['drugStart'][0]/window), int(session_info['drugEnd'][1]/window)),
+            #     post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
+            # )
+
+            eyes_close = session_info['eyesClose'][1] if isinstance(session_info['eyesClose'], np.ndarray) else session_info['eyesClose']
+            slice_funcs = dict(
+                pre=lambda window: slice(0, int(session_info['drugStart'][0]/window)),
+                induction=lambda window: slice(int(session_info['drugStart'][0]/window), int(eyes_close/window)),
+                during=lambda window: slice(int(eyes_close/window), int(session_info['drugEnd'][1]/window)),
+                post=lambda window: slice(int(session_info['drugEnd'][1]/window),-1)
+            )
+        elif data_class == 'leverOddball':
+            slice_funcs = dict(
+                whole=lambda window: slice(0, -1)
+            )
+        # -----------------------------------------------------
+        # RUN WINDOW SELECTION
+        # -----------------------------------------------------
+        if window_selection_info_path is None:
+            if verbose:
+                print(f"Session {session}: selected windows by phase with {pred_steps}-step prediction not found. Running now.")
                 
-                predictions[area][window] = np.zeros((len(VAR_results[area]) - 1, T_pred, len(unit_indices)))
-                true_vals[area][window] = np.zeros(predictions[area][window].shape)
+            variables = ['electrodeInfo', 'lfp', 'lfpSchema']
+            session_vars, T, N, dt = load_session_data(session, all_data_dir, variables, data_class=data_class, verbose=verbose)
+            electrode_info, lfp, lfp_schema = session_vars['electrodeInfo'], session_vars['lfp'], session_vars['lfpSchema']
 
-                for i in tqdm(range(predictions[area][window].shape[0])):
-                    row = VAR_results[area].iloc[i]
-                    start_step = int(stride*i/dt)
-                    # x0 = lfp[start_step + int(window/dt) - 1, unit_indices]
+            # find completed windows 
+            # TODO: account for the specific bandpass frequencies
+            windows = []
+            if bandpass_info is None:
+                regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
+            else:
+                if bandpass_info['flag']:
+                    regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_bandpass")
+                else:
+                    regex = re.compile(f"VAR_{session}_window_" + ".{1,3}_stride_.{1,3}_[a-zA-Z]{3}-")
 
-                    for t in range(T_pred):
-                        predictions[area][window][i, t] = np.hstack([[1], lfp[start_step + int(window/dt) - 1 + t, unit_indices]]) @ row.A_mat_with_bias
-                        # if t == 0:
-                        #     predictions[area][window][i, t] = np.hstack([[1], x0]) @ row.A_mat_with_bias
-                        # else:
-                        #     predictions[area][window][i, t] = np.hstack([[1], predictions[area][window][i, t - 1]]) @ row.A_mat_with_bias
+            for file_name in os.listdir(results_dir):
+                if regex.match(file_name):
+                    if bandpass_info is None:
+                        windows.append(float(file_name.split('_')[-3]))
+                    else:
+                        if bandpass_info['flag']:
+                            windows.append(float(file_name.split('_')[-7]))
+                        else:
+                            windows.append(float(file_name.split('_')[-3]))
+            windows.sort()
+            windows = [int(w) if w % 1 == 0 else w for w in np.unique(windows)]
 
-                    true_vals[area][window][i] = lfp[start_step + int(window/dt):start_step + int(window/dt) + T_pred, unit_indices]
+            # -----------------------------------------------------
+            # compute forward predictions
+            # (note that this assumes window and stride are the same)
+            # -----------------------------------------------------
 
-                step_mse[area][window] = ((predictions[area][window] - true_vals[area][window])**2).mean(axis=2)
+            T_pred = pred_steps
+
+            predictions = {}
+            true_vals = {}
+            step_mse = {}
+            for area in np.unique(electrode_info['area']):
+                predictions[area] = {}
+                true_vals[area] = {}
+                step_mse[area] = {}
+            predictions['all'] = {}
+            true_vals['all'] = {}
+            step_mse['all'] = {}
+
+            for window in windows:
+                stride = window
+                if verbose:
+                    print(f"Now computing window = {window}")
+                VAR_results_dir = get_result_path(results_dir, session, window, stride, bandpass_info=bandpass_info)
+                VAR_results = {}
+                for file_name in tqdm(os.listdir(VAR_results_dir)):
+                    try:
+                        VAR_results[file_name] = load(os.path.join(VAR_results_dir, file_name))
+                    except IsADirectoryError:
+                        if verbose:
+                            print(f"Need to compile {os.path.join(VAR_results_dir, file_name)}")
+                        # compile results
+                        VAR_results[file_name] = compile_folder(os.path.join(VAR_results_dir, file_name))
+                
+                for area in VAR_results.keys():
+                    if area == 'all':
+                        unit_indices = np.arange(len(electrode_info['area']))
+                    else:
+                        unit_indices = np.where(electrode_info['area'] == area)[0]
+                    
+                    predictions[area][window] = np.zeros((len(VAR_results[area]) - 1, T_pred, len(unit_indices)))
+                    true_vals[area][window] = np.zeros(predictions[area][window].shape)
+
+                    for i in tqdm(range(predictions[area][window].shape[0])):
+                        row = VAR_results[area].iloc[i]
+                        start_step = int(stride*i/dt)
+                        # x0 = lfp[start_step + int(window/dt) - 1, unit_indices]
+
+                        for t in range(T_pred):
+                            predictions[area][window][i, t] = np.hstack([[1], lfp[start_step + int(window/dt) - 1 + t, unit_indices]]) @ row.A_mat_with_bias
+                            # if t == 0:
+                            #     predictions[area][window][i, t] = np.hstack([[1], x0]) @ row.A_mat_with_bias
+                            # else:
+                            #     predictions[area][window][i, t] = np.hstack([[1], predictions[area][window][i, t - 1]]) @ row.A_mat_with_bias
+
+                        true_vals[area][window][i] = lfp[start_step + int(window/dt):start_step + int(window/dt) + T_pred, unit_indices]
+
+                    step_mse[area][window] = ((predictions[area][window] - true_vals[area][window])**2).mean(axis=2)
+            
+            # -----------------------------------------------------
+            # pick and save selected_windows
+            # -----------------------------------------------------
+            selected_windows = {}
+            window_mses = {}
+
+            phases = slice_funcs.keys()
+
+            for phase in phases:
+                slice_func = slice_funcs[phase]
+                selected_windows[phase] = {}
+                window_mses[phase] = {}
+                for area in step_mse.keys():
+                    window_mses[phase][area] = [step_mse[area][window][slice_func(window), :].mean() for window in windows]
+
+                    asymptotic_value = np.array(window_mses[phase][area]).min()
+                    asymptotic_ind = np.argmin(window_mses[phase][area])
+                    for i in range(len(window_mses[phase][area])):
+                        if window_mses[phase][area][i]*pct_of_value <= asymptotic_value or i == asymptotic_ind:
+                            selected_windows[phase][area] = windows[i]
+                            break
+            
+            window_selection_info = dict(
+                selected_windows=selected_windows,
+                predictions=predictions,
+                true_vals=true_vals,
+                step_mse=step_mse,
+                window_mses=window_mses
+            )
+
+            save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_phases_{pred_steps}_steps")
+            if bandpass_info is not None:
+                if bandpass_info['flag']:
+                    save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+            save(window_selection_info, save_file_path)
+        else:
+            window_selection_info = load(window_selection_info_path)
         
         # -----------------------------------------------------
-        # pick and save selected_windows
+        # LOAD AND COMPILE DATA
         # -----------------------------------------------------
-        selected_windows = {}
-        window_mses = {}
 
-        phases = slice_funcs.keys()
+        selected_windows = window_selection_info['selected_windows']
 
-        for phase in phases:
-            slice_func = slice_funcs[phase]
-            selected_windows[phase] = {}
-            window_mses[phase] = {}
-            for area in step_mse.keys():
-                window_mses[phase][area] = [step_mse[area][window][slice_func(window), pred_steps - 1].mean() for window in windows]
+        window_info = {}
+        for phase in selected_windows.keys():
+            for area, window in selected_windows[phase].items():
+                window = int(window) if window % 1 == 0 else window
+                if window not in window_info.keys():
+                    window_info[window] = []
+                window_info[window].append((area, phase))
 
-                asymptotic_value = np.array(window_mses[phase][area]).min()
-                asymptotic_ind = np.argmin(window_mses[phase][area])
-                for i in range(len(window_mses[phase][area])):
-                    if window_mses[phase][area][i]*pct_of_value <= asymptotic_value or i == asymptotic_ind:
-                        selected_windows[phase][area] = windows[i]
-                        break
+        columns = ['explained_variance', 'A_mat', 'A_mat_with_bias', 'eigs',
+                    'criticality_inds', 'sigma2_ML', 'AIC', 'sigma_norm', 'start_time',
+                        'start_ind', 'end_time', 'end_ind']
+                
+        VAR_results = {}
+        key = list(selected_windows.keys())[0]
+        for area in selected_windows[key].keys():
+            VAR_results[area] = {col: [] for col in columns}
+
+
+        for window in window_info.keys():
+            stride = window
+            areas_to_load = np.unique([entry[0] for entry in window_info[window]])
+            VAR_results_dir = get_result_path(results_dir, session, window, stride)
+            
+            temp_results = {}
+            for area in areas_to_load:
+                if verbose:
+                    print(f"Now attempting to load area {area} with window {window}")
+                try:
+                    temp_results[area] = load(os.path.join(VAR_results_dir, area))
+                except IsADirectoryError:
+                    if verbose:
+                        print(f"Need to compile {os.path.join(VAR_results_dir, area)}")
+                    # compile results
+                    temp_results[area] = compile_folder(os.path.join(VAR_results_dir, area))
+            
+            for (area, phase) in window_info[window]:
+                for key in columns:
+                    VAR_results[area][key].extend(temp_results[area][key].iloc[slice_funcs[phase](window)])
+                VAR_results
+
+        for area in VAR_results.keys():
+            VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
+            VAR_results[area]['window'] = VAR_results[area].apply(lambda row: row.end_time - row.start_time, axis=1)
         
-        window_selection_info = dict(
-            selected_windows=selected_windows,
-            step_mse=step_mse,
-            window_mses=window_mses
-        )
-
-        save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_phases_{pred_steps}_steps")
+        save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
         if bandpass_info is not None:
             if bandpass_info['flag']:
-                save_file_path = os.path.join(window_selection_dir, f"{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
-        save(window_selection_info, save_file_path)
-    
-    # -----------------------------------------------------
-    # LOAD AND COMPILE DATA
-    # -----------------------------------------------------
+                save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
 
-    selected_windows = window_selection_info['selected_windows']
-
-    window_info = {}
-    for phase in selected_windows.keys():
-        for area, window in selected_windows[phase].items():
-            window = int(window) if window % 1 == 0 else window
-            if window not in window_info.keys():
-                window_info[window] = []
-            window_info[window].append((area, phase))
-
-    columns = ['explained_variance', 'A_mat', 'A_mat_with_bias', 'eigs',
-                'criticality_inds', 'sigma2_ML', 'AIC', 'sigma_norm', 'start_time',
-                    'start_ind', 'end_time', 'end_ind']
-            
-    VAR_results = {}
-    key = list(selected_windows.keys())[0]
-    for area in selected_windows[key].keys():
-        VAR_results[area] = {col: [] for col in columns}
-
-
-    for window in window_info.keys():
-        stride = window
-        areas_to_load = np.unique([entry[0] for entry in window_info[window]])
-        VAR_results_dir = get_result_path(results_dir, session, window, stride)
+        save(VAR_results, save_file_path)
         
-        temp_results = {}
-        for area in areas_to_load:
-            print(f"Now attempting to load area {area} with window {window}")
-            try:
-                temp_results[area] = load(os.path.join(VAR_results_dir, area))
-            except IsADirectoryError:
-                print(f"Need to compile {os.path.join(VAR_results_dir, area)}")
-                # compile results
-                temp_results[area] = compile_folder(os.path.join(VAR_results_dir, area))
-        
-        for (area, phase) in window_info[window]:
-            for key in columns:
-                VAR_results[area][key].extend(temp_results[area][key].iloc[slice_funcs[phase](window)])
-            VAR_results
+        if return_data:
+            return VAR_results, window_selection_info
 
-    for area in VAR_results.keys():
-        VAR_results[area] = pd.DataFrame(VAR_results[area]).sort_values('start_time').reset_index(drop=True)
-        VAR_results[area]['window'] = VAR_results[area].apply(lambda row: row.end_time - row.start_time, axis=1)
+def compute_summary_statistics(df, session_info):
+    ret_info = {}
     
-    save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_phases_{pred_steps}_steps")
-    if bandpass_info is not None:
-        if bandpass_info['flag']:
-            save_file_path = os.path.join(window_selection_dir, f"VAR_{session}_selected_windows_bandpass_phases_{pred_steps}_steps")
+    # -----------------
+    # MEAN STATS AND MANN WHITNEY U TEST
+    # -----------------
+    
+    if isinstance(session_info['eyesClose'], float):
+        eyes_close = session_info['eyesClose']
+    else:
+        eyes_close = session_info['eyesClose'][-1]
 
-    save(VAR_results, save_file_path)
+    anesthesia_start_ind = np.argmax(df['start_time'] > session_info['drugStart'][0])
+    LOC_ind = np.argmax(df['start_time'] > eyes_close)
+    anesthesia_end_ind = np.argmax(df['start_time'] > session_info['drugEnd'][1])
+    
+    wake_inds = np.hstack(df[:anesthesia_start_ind].criticality_inds.to_numpy())
+    anesthesia_inds = np.hstack(df[LOC_ind:anesthesia_end_ind].criticality_inds.to_numpy())
 
-    return VAR_results, window_selection_info
+    ret_info['wake_mean'] = wake_inds.mean()
+    ret_info['wake_sd'] = wake_inds.std()
+    ret_info['wake_se'] = ret_info['wake_sd']/np.sqrt(len(wake_inds))
+
+    ret_info['anesthesia_mean'] = anesthesia_inds.mean()
+    ret_info['anesthesia_sd'] = anesthesia_inds.std()
+    ret_info['anesthesia_se'] = ret_info['anesthesia_sd']/np.sqrt(len(anesthesia_inds))
+    
+    mannwhitney_ret = scipy.stats.mannwhitneyu(wake_inds, anesthesia_inds, alternative='less')
+    ret_info['mannwhitney_stat'] = mannwhitney_ret.statistic
+    ret_info['mannwhitney_p'] = mannwhitney_ret.pvalue
+    
+    # plt.figure(figsize=(12, 5))
+    # plt.hist(wake_inds, label='wakeful', density=True, alpha=0.7)
+    # plt.axvline(wake_inds.mean(), c='C0', linestyle='--', label='wakeful mean')
+    # plt.hist(anesthesia_inds, label='anesthesia', density=True, alpha=0.7)
+    # plt.axvline(anesthesia_inds.mean(), c='C1', linestyle='--', label='anesthesia mean')
+    # plt.legend(fontsize=13)
+    # plt.ylabel("Density", fontsize=14)
+    # plt.xlabel("Criticality Index", fontsize=14)
+    # plt.tick_params(labelsize=13)
+    # plt.show()
+    
+    # -----------------
+    # DESTABILIZATION RATE
+    # -----------------
+    
+    destab_inds = df[anesthesia_start_ind:LOC_ind].criticality_inds.apply(lambda x: x.mean()).to_numpy()
+
+    time_vals = df[anesthesia_start_ind:LOC_ind].start_time.to_numpy().reshape(-1, 1)
+    lr_fit = LinearRegression().fit(time_vals, destab_inds)
+    beta = lr_fit.coef_[0] # s^{-1}
+    ret_info['beta'] = beta
+    
+    preds = lr_fit.predict(time_vals)
+    sigma_2 = np.mean((preds - destab_inds)**2)
+    var_beta = sigma_2/((time_vals - time_vals.mean())**2).sum()
+    beta_SD = np.sqrt(var_beta)
+    ret_info['beta_SE'] = beta_SD
+    CI = scipy.stats.t.ppf(0.975, len(destab_inds) - 2)*beta_SD
+    ret_info['CI_low'], ret_info['CI_high'] = beta - CI, beta + CI
+    ret_info['r2_score'] = r2_score(destab_inds, lr_fit.predict(time_vals))
+    
+    # plt.plot(time_vals/60, destab_inds, label='true values')
+    # plt.plot(time_vals/60, preds, label=f'regression: rate = {beta:.2e}' + r'$\pm$' + f'{CI:.2e}' + r' $s^{-1}$', linestyle='--')
+    # plt.xlabel("Time in Session (min)", fontsize=14)
+    # plt.ylabel("Mean Criticality Index", fontsize=14)
+    # plt.tick_params(labelsize=13)
+    # plt.legend(fontsize=11)
+    # plt.show()
+    
+    return ret_info
