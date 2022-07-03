@@ -281,7 +281,7 @@ def get_result_path(results_dir, session, window, stride=None, bandpass_info=Non
     
     return os.path.join(results_dir, filename)
 
-def save_lfp_chunks(session, all_data_dir, chunk_time_s=4*60):
+def save_lfp_chunks(session, chunk_time_s=4*60):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     data_class = get_data_class(session, all_data_dir)
     

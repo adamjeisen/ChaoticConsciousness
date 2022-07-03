@@ -59,8 +59,9 @@ def estimate_stability_using_particle(
     if test_eigenvectors:
         # generate p vectors along the eigenvectors of js[0]
         eig_vals, eig_vecs = np.linalg.eig(js[0])
-        ind_max_eig = np.argmax(np.abs(eig_vals))
-        leading_eig_vec = np.real(eig_vecs[:, 0])
+        # ind_max_eig = np.argmax(np.abs(eig_vals))
+        ind_max_eig = np.argmin(np.abs(eig_vals))
+        leading_eig_vec = np.real(eig_vecs[:, ind_max_eig])
         random_scalings = np.random.normal(0, 1, p)
         U = leading_eig_vec[:, None] * random_scalings + np.random.normal(
             0, 0.001, (N, p)

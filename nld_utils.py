@@ -1,4 +1,4 @@
-import nolds
+# import nolds
 from nolitsa import delay, lyapunov
 import numpy as np
 from scipy.integrate import odeint
