@@ -29,7 +29,7 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     y = lfilter(b, a, data)
     return y
 
-def compute_VAR_p(window_data, p=1, unit_indices=None, PCA_dim=-1):
+def compute_VAR_p(window_data, p=1, lamb=0, unit_indices=None, PCA_dim=-1):
     if unit_indices is None:
         chunk = window_data
     else:
@@ -44,16 +44,39 @@ def compute_VAR_p(window_data, p=1, unit_indices=None, PCA_dim=-1):
         chunk = pca.fit_transform(chunk)
         results['explained_variance'] = pca.explained_variance_ratio_
     
+    window = chunk.shape[0]
+    N = chunk.shape[1]
+
     model = VAR(chunk)
     VAR_results = model.fit(p)
-
+    coefs = VAR_results.coefs
     results['coefs'] = VAR_results.coefs
     results['intercept'] = VAR_results.intercept
 
-    N = chunk.shape[1]
+    # X_p = np.zeros((N*p + 1, window - p))
+    # # Y_p = np.zeros((N*p, window - p))
+    # Y = np.zeros((N, window - p))
+    # for t in range(window - p):
+    #     for i in range(p):
+    #         X_p[i*N:(i + 1)*N, t] = chunk[t + p - 1 - i]
+    #         # Y_p[i*N:(i + 1)*N, t] = chunk[t + p - i]
+    #     Y[:, t] = chunk[t + p]
+    # X_p[-1] = np.ones(window - p)
+    # U, S, Vh = np.linalg.svd(X_p)
+
+    # S_mat_inv = np.zeros((window - p, N*p + 1))
+    # S_mat_inv[np.arange(N*p + 1), np.arange(N*p + 1)] = S/(S**2 + lamb)
+    # # full_mat = Y_p[:N] @ Vh.T @ S_mat_inv @ U.t
+    # full_mat = Y @ Vh.T @ S_mat_inv @ U.T
+    # coefs = np.zeros((p, N, N))
+    # for j in range(p):
+    #     coefs[j] = full_mat[:, j*N:(j + 1)*N]
+    # results['coefs'] = coefs
+    # results['intercept'] = full_mat[:, -1]
+
     A_mat = np.zeros((N*p, N*p))
     for i in range(p):
-        A_mat[0:N][:, i*N:(i+1)*N] = VAR_results.coefs[i]
+        A_mat[0:N][:, i*N:(i+1)*N] = coefs[i]
 
     for i in range(p - 1):
         A_mat[(i + 1)*N:(i + 2)*N][:, i*N:(i + 1)*N] = np.eye(N)
