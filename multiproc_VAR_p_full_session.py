@@ -10,15 +10,13 @@ import queue
 import re
 from scipy.signal import butter, lfilter
 from scipy.stats import pearsonr
-from sklearn.decomposition import PCA
-from statsmodels.tsa import stattools
-from statsmodels.tsa.api import VAR
 import sys
 import time
 from tqdm.auto import tqdm
 import traceback
 
 sys.path.append('../..')
+from dynamical_systems_models import compute_VAR_p, predict_VAR_p
 from utils import compile_folder, get_data_class, load, load_session_data, load_window_from_chunks, save
 
 def butter_bandpass(lowcut, highcut, fs, order=5):
@@ -28,72 +26,6 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     b, a = butter_bandpass(lowcut, highcut, fs, order=order)
     y = lfilter(b, a, data)
     return y
-
-def compute_VAR_p(window_data, p=1, unit_indices=None, PCA_dim=-1):
-    if unit_indices is None:
-        chunk = window_data
-    else:
-        chunk = window_data[:, unit_indices]
-
-    results = {}
-    results['explained_variance'] = None
-    if PCA_dim > 0:
-        if PCA_dim < 2:
-            raise ValueError(f"PCA dimension must be greater than 1; provided value was {PCA_dim}")
-        pca = PCA(n_components=PCA_dim)
-        chunk = pca.fit_transform(chunk)
-        results['explained_variance'] = pca.explained_variance_ratio_
-    
-    model = VAR(chunk)
-    VAR_results = model.fit(p)
-
-    results['coefs'] = VAR_results.coefs
-    results['intercept'] = VAR_results.intercept
-
-    N = chunk.shape[1]
-    A_mat = np.zeros((N*p, N*p))
-    for i in range(p):
-        A_mat[0:N][:, i*N:(i+1)*N] = VAR_results.coefs[i]
-
-    for i in range(p - 1):
-        A_mat[(i + 1)*N:(i + 2)*N][:, i*N:(i + 1)*N] = np.eye(N)
-    e = np.linalg.eigvals(A_mat)   
-    results['eigs'] = e  
-    results['criticality_inds'] = np.abs(e)
-
-    try:
-        results['info_criteria'] = VAR_results.info_criteria
-    except:
-        results['info_criteria'] = None
-
-    return results
-
-def predict_VAR_p(data, coefs, intercept, unit_indices=None):
-    if unit_indices is None:
-        chunk = data
-    else:
-        chunk = data[:, unit_indices]
-    
-    # BUILD PARAMS FOR PREDICTION
-    p = coefs.shape[0]
-    n = chunk.shape[1]
-    
-    params = np.zeros((1 + n*p, n))
-    params[0] = intercept
-    for i in range(p):
-        params[1 + i*n:1 + (i + 1)*n] = coefs[i].T
-
-    # LAG DATA
-    lagged_data = np.zeros((chunk.shape[0] - p, chunk.shape[1]*p + 1))
-    lagged_data[:, 0] = np.ones(lagged_data.shape[0])
-    for i in range(p):
-        lagged_data[:, i*chunk.shape[1] + 1:(i + 1)*chunk.shape[1] + 1] = chunk[p - 1 - i:chunk.shape[0] - 1 - i]
-    
-    # PREDICT
-    prediction = lagged_data @ params
-    true_vals = chunk[p:]
-    
-    return prediction, true_vals
 
 def uniquify(path):
     filename, extension = os.path.splitext(path)

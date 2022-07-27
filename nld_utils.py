@@ -6,15 +6,16 @@ from scipy.signal import argrelextrema
 from scipy import spatial
 from tqdm.auto import tqdm
 
-def embed_signal(x, m, tau):
-    embedding = np.zeros((len(x) - m * tau, m))
-    for n in range(len(x) - m * tau):
+def embed_signal(x, m, tau, direction='forward'):
+    embedding = np.zeros((x.shape[0] - (m - 1) * tau, x.shape[1]*m))
+    for n in range(x.shape[0] - (m - 1) * tau):
         for mult in range(m):
-            #             print(f"item [{n}, {mult}] = x[{n + mult*tau}]")
-            embedding[n, mult] = x[n + mult * tau]
-
+            # print(f"embedding[n, mult].shape = {embedding[n, mult].shape}, x[n + mult * tau].shape = {x[n + mult * tau].shape}")
+            if direction == 'forward':
+                embedding[n, mult*x.shape[1]:(mult + 1)*x.shape[1]] = x[n + mult * tau]
+            else: # direction == 'reverse'
+                embedding[n, (m - 1 - mult)*x.shape[1]:(m - mult)*x.shape[1]] = x[n + mult * tau]
     return embedding
-
 
 def get_nn_indices(pts, p=2):
     kdTree = spatial.cKDTree(pts, leafsize=100)
