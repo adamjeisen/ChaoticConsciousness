@@ -6,7 +6,7 @@ import time
 
 def get_data_class(session, all_data_dir):
     data_class = None
-    for (dirpath, dirnames, filenames) in os.walk(all_data_dir): 
+    for (dirpath, dirnames, filenames) in os.walk(all_data_dir):
         if f"{session}.mat" in filenames:
             data_class = os.path.basename(dirpath)
             break
