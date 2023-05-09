@@ -1,3 +1,4 @@
+from copy import deepcopy
 import numpy as np
 import os
 import pandas as pd
@@ -14,6 +15,53 @@ def get_data_class(session, all_data_dir):
         raise ValueError(f"Neural data for session {session} could not be found in the provided folder.")
 
     return data_class
+
+def combine_grid_results(results_dict):
+    all_results = None
+    for key, results in results_dict.items():
+        if all_results is None:
+            all_results = deepcopy(results)
+            if 'AICs' not in all_results.columns:
+                all_results['AICs'] = all_results.AIC.apply(lambda x: [x])
+                all_results = all_results.drop('AIC', axis='columns')
+        else:
+            for i, row in results.iterrows():
+                if i in all_results.index:
+                    if 'AICs' in row:
+                        all_results.loc[i, 'AICs'].extend(row.AICs)
+                    else:
+                        all_results.loc[i, 'AICs'].append(row.AIC)
+                    if 'time_vals' in all_results.columns:
+                        all_results.loc[i, 'time_vals'].extend(row.time_vals)
+                    if 'file_paths' in all_results.columns:
+                        all_results.loc[i, 'file_paths'].extend(row.file_paths)
+                else:
+                    if 'AICs' in row:
+                        all_results.loc[i] = {'AICs': row.AICs, 'time_vals': row.time_vals, 'file_paths': row.file_paths}
+                    else:
+                        all_results.loc[i] = {'AICs': [row.AIC], 'time_vals': row.time_vals, 'file_paths': row.file_paths}
+#     full_length_inds = all_results.AICs.apply(lambda x: len(x)) == all_results.AICs.apply(lambda x: len(x)).max()
+#     window, matrix_size, r = all_results.index[full_length_inds][all_results[full_length_inds].AICs.apply(lambda x: np.mean(x)).argmin()]
+    
+#     all_results = all_results.drop(all_results[all_results.index.get_level_values('matrix_size') < all_results.index.get_level_values('r')].index, inplace=False)
+#     window, matrix_size, r = all_results.index[all_results.AICs.apply(lambda x: np.mean(x)).argmin()]
+    
+    while True:
+        opt_index = all_results.index[all_results.AICs.apply(lambda x: np.mean(x)).argmin()]
+        in_all_dfs = True
+        for key, result in results_dict.items():
+            if opt_index not in result.index:
+                in_all_dfs = False
+                break
+
+        if in_all_dfs:
+            break
+        else:
+            all_results = all_results.drop(opt_index, inplace=False)
+    
+    window, matrix_size, r = opt_index
+
+    return window, matrix_size, r, all_results
 
 def save_lfp_chunks(session, chunk_time_s=4*60):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
@@ -37,36 +85,44 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
         end_ind = np.min([(i+1)*chunk_width, lfp.shape[0]])
         chunk = lfp[start_ind:end_ind]
         filepath = os.path.join(save_dir, f"chunk_{i}")
-        save(chunk, filepath)
-        directory.append(dict(
-            start_ind=start_ind,
-            end_ind=end_ind,
-            filepath=filepath,
-            start_time=start_ind*dt,
-            end_time=end_ind*dt
-        ))
+        if os.path.exists(filepath):
+            print(f"Chunk at {file_path} already exists")
+        else:
+            save(chunk, filepath)
+            directory.append(dict(
+                start_ind=start_ind,
+                end_ind=end_ind,
+                filepath=filepath,
+                start_time=start_ind*dt,
+                end_time=end_ind*dt
+            ))
     
     directory = pd.DataFrame(directory)
     
     save(directory, os.path.join(save_dir, "directory"))
 #         print(f"Chunk: {start_ind/(1000*60)} min to {end_ind/(1000*60)} ([{start_ind}, {end_ind}])")
 
-def load_window_from_chunks(window_start, window_end, directory, N, dt):
+def load_window_from_chunks(window_start, window_end, directory, dimension_inds=None):
+    dt = directory.end_time.iloc[0]/directory.end_ind.iloc[0]
     window_start = int(window_start/dt)
     window_end = int(window_end/dt)
-
+    
     start_time_bool = directory.start_ind <= window_start
     start_row = np.argmin(start_time_bool) - 1 if np.sum(start_time_bool) < len(directory) else len(directory) - 1
     end_time_bool = directory.end_ind > window_end
     end_row = np.argmax(end_time_bool) if np.sum(end_time_bool) > 0 else len(directory) - 1
-
-    window_data = np.zeros((window_end - window_start, N))
-
+    
+    window_data = None
+    
     pos_in_window = 0
     for row_ind in range(start_row, end_row + 1):
         row = directory.iloc[row_ind]
         chunk = pd.read_pickle(row.filepath)
-
+        if dimension_inds is None:
+            dimension_inds = np.arange(chunk.shape[1])
+        if window_data is None:
+            window_data = np.zeros((window_end - window_start, len(dimension_inds)))
+                
         if row.start_ind <= window_start:
             start_in_chunk = window_start - row.start_ind
         else:
@@ -77,9 +133,9 @@ def load_window_from_chunks(window_start, window_end, directory, N, dt):
         else:
             end_in_chunk = window_end - row.start_ind
 
-        window_data[pos_in_window:pos_in_window + end_in_chunk - start_in_chunk] = chunk[start_in_chunk:end_in_chunk]
+        window_data[pos_in_window:pos_in_window + end_in_chunk - start_in_chunk] = chunk[start_in_chunk:end_in_chunk, dimension_inds]
         pos_in_window += end_in_chunk - start_in_chunk
-    
+                
     return window_data
 
 def load_session_data(session, all_data_dir, variables, data_class=None, verbose=True):   
