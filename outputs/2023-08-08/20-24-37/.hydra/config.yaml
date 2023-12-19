@@ -1,0 +1,9 @@
+ltsa_dim_reduction:
+  params:
+    session: Mary-Anesthesia-20160912-02
+    pca_dims: 12
+    delay_p: 32
+    delay_tau: 20
+    standardize: true
+    subsample: 3
+    n_neighbors_pct: 2.5

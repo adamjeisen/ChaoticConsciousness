@@ -77,7 +77,7 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
     save_dir = os.path.join(all_data_dir, data_class, f"{session}_lfp_chunked_{chunk_time_s}s")
     os.makedirs(save_dir, exist_ok=True)
     
-    chunk_width = int(chunk_time_s/dt)
+    chunk_width = int(chunk_time_s*fs)
     num_chunks = int(np.ceil(lfp.shape[0]/chunk_width))
     directory = []
     for i in tqdm(range(num_chunks)):
@@ -104,8 +104,9 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
 
 def load_window_from_chunks(window_start, window_end, directory, dimension_inds=None):
     dt = directory.end_time.iloc[0]/directory.end_ind.iloc[0]
-    window_start = int(window_start/dt)
-    window_end = int(window_end/dt)
+    fs = 1/dt
+    window_start = int(window_start*fs)
+    window_end = int(window_end*fs)
     
     start_time_bool = directory.start_ind <= window_start
     start_row = np.argmin(start_time_bool) - 1 if np.sum(start_time_bool) < len(directory) else len(directory) - 1
@@ -160,6 +161,8 @@ def load_session_data(session, all_data_dir, variables, data_class=None, verbose
     if 'electrodeInfo' in variables:
         if session in ['MrJones-Anesthesia-20160201-01', 'MrJones-Anesthesia-20160206-01', 'MrJones-Anesthesia-20160210-01']:
             session_vars['electrodeInfo']['area'] = np.delete(session_vars['electrodeInfo']['area'], np.where(np.arange(len(session_vars['electrodeInfo']['area'])) == 60))
+            session_vars['electrodeInfo']['channel'] = np.delete(session_vars['electrodeInfo']['channel'], np.where(np.arange(len(session_vars['electrodeInfo']['channel'])) == 60))
+            session_vars['electrodeInfo']['NSP'] = np.delete(session_vars['electrodeInfo']['NSP'], np.where(np.arange(len(session_vars['electrodeInfo']['NSP'])) == 60))
         elif data_class == 'leverOddball':
             session_vars['electrodeInfo']['area'] = np.array([f"{area}-{h[0].upper()}" for area, h in zip(session_vars['electrodeInfo']['area'], session_vars['electrodeInfo']['hemisphere'])])
     T = len(session_vars['lfpSchema']['index'][0])
