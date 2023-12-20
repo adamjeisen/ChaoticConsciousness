@@ -1,6 +1,0 @@
-defaults:
-  - ltsa_dim_reduction: default
-  - hyperparameter_testing: default
-  - slurm: default
-  - _self_
-  

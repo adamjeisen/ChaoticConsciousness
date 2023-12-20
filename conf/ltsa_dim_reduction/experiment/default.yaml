@@ -1,7 +1,0 @@
-# @package _global_
-hydra:
-  run:
-    dir: /scratch2/weka/millerlab/eisenaj/ChaoticConsciousness/ltsa_dim_reduction_multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
-  sweep:
-    dir: /scratch2/weka/millerlab/eisenaj/ChaoticConsciousness/ltsa_dim_reduction_multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
-      
