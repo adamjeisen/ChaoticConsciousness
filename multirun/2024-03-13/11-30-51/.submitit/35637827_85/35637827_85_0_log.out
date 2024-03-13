@@ -1,0 +1,30 @@
+submitit INFO (2024-03-13 11:31:41,607) - Starting with JobEnvironment(job_id=35637827_85, hostname=node075, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:31:41,607) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-30-51/.submitit/35637827_85/35637827_85_submitted.pkl
+[2024-03-13 11:31:55,505][DeLASE Logger][INFO] - Process ID 2609471 executing task Mary-Anesthesia-20160809-01, all, 85, with JobEnvironment(job_id=35637827_85, hostname=node075, local_rank=0(1), node=0(1), global_rank=0(1))
+[2024-03-13 11:31:55,518][DeLASE Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 85 does not exist. Running.
+Loading data: ['lfpSchema']...
+lfpSchema : dict with keys[dataDim,dataUnits,description,dims,history,index,indexUnits,mask,smpInterval,smpRate,timeUnits,userData,]
+
+Data loaded (took 0.45 seconds)
+[2024-03-13 11:32:17,227][DeLASE Logger][INFO] - Fitting DeLASE
+Computing Hankel matrix ...
+Hankel matrix computed!
+Computing SVD on Hankel matrix ...
+SVD complete!
+Computing least squares fits to HAVOK DMD ...
+Least squares complete! 
+
+Computing jacbians...
+Computing DDE characteristic roots...
+Characteristic root computation complete!
+Filtering characteristic roots...
+Stability analysis complete
+[2024-03-13 11:32:34,610][DeLASE Logger][INFO] - DeLASE fit in 17.38266897201538 seconds
+[2024-03-13 11:32:34,611][DeLASE Logger][INFO] - Computing metrics
+[2024-03-13 11:32:39,917][DeLASE Logger][INFO] - AIC: DeLASE: -11.55897704895902, PB: -10.124306665341521, VAR: -9.878319970232692, VAR_small: -4.423176995197398
+[2024-03-13 11:32:39,917][DeLASE Logger][INFO] - Metrics computed!
+[2024-03-13 11:32:39,921][DeLASE Logger][INFO] - Saving results
+submitit INFO (2024-03-13 11:32:39,973) - Job completed successfully
+[2024-03-13 11:32:39,973][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:32:39,992) - Exiting after successful completion
+[2024-03-13 11:32:39,992][submitit][INFO] - Exiting after successful completion

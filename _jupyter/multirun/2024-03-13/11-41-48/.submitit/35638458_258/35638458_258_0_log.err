@@ -1,0 +1,21 @@
+submitit ERROR (2024-03-13 11:43:00,973) - Submitted job triggered an exception
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/_submit.py", line 11, in <module>
+    submitit_main()
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/submission.py", line 76, in submitit_main
+    process_job(args.folder)
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/submission.py", line 69, in process_job
+    raise error
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/submission.py", line 52, in process_job
+    delayed = utils.DelayedSubmission.load(paths.submitted_pickle)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/utils.py", line 149, in load
+    obj = pickle_load(filepath)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/om2/user/eisenaj/miniforge3/envs/communication-transformer/lib/python3.11/site-packages/submitit/core/utils.py", line 228, in pickle_load
+    return pickle.load(ifile)
+           ^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'data_utils'
+srun: error: node114: task 0: Exited with exit code 1

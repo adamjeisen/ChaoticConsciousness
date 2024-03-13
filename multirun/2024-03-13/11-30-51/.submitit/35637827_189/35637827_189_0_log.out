@@ -1,0 +1,30 @@
+submitit INFO (2024-03-13 11:31:44,535) - Starting with JobEnvironment(job_id=35637827_189, hostname=node111, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:31:44,537) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-30-51/.submitit/35637827_189/35637827_189_submitted.pkl
+[2024-03-13 11:32:05,889][DeLASE Logger][INFO] - Process ID 2243801 executing task Mary-Anesthesia-20160809-01, all, 189, with JobEnvironment(job_id=35637827_189, hostname=node111, local_rank=0(1), node=0(1), global_rank=0(1))
+[2024-03-13 11:32:05,894][DeLASE Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 189 does not exist. Running.
+Loading data: ['lfpSchema']...
+lfpSchema : dict with keys[dataDim,dataUnits,description,dims,history,index,indexUnits,mask,smpInterval,smpRate,timeUnits,userData,]
+
+Data loaded (took 0.24 seconds)
+[2024-03-13 11:32:10,862][DeLASE Logger][INFO] - Fitting DeLASE
+Computing Hankel matrix ...
+Hankel matrix computed!
+Computing SVD on Hankel matrix ...
+SVD complete!
+Computing least squares fits to HAVOK DMD ...
+Least squares complete! 
+
+Computing jacbians...
+Computing DDE characteristic roots...
+Characteristic root computation complete!
+Filtering characteristic roots...
+Stability analysis complete
+[2024-03-13 11:32:24,669][DeLASE Logger][INFO] - DeLASE fit in 13.806300640106201 seconds
+[2024-03-13 11:32:24,669][DeLASE Logger][INFO] - Computing metrics
+[2024-03-13 11:32:27,818][DeLASE Logger][INFO] - AIC: DeLASE: -12.550227008168461, PB: -10.824218979359715, VAR: -10.282134465711238, VAR_small: -2.720263367509264
+[2024-03-13 11:32:27,818][DeLASE Logger][INFO] - Metrics computed!
+[2024-03-13 11:32:27,821][DeLASE Logger][INFO] - Saving results
+submitit INFO (2024-03-13 11:32:27,825) - Job completed successfully
+[2024-03-13 11:32:27,825][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:32:27,835) - Exiting after successful completion
+[2024-03-13 11:32:27,835][submitit][INFO] - Exiting after successful completion

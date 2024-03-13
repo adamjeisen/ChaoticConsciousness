@@ -1,0 +1,30 @@
+submitit INFO (2024-03-13 11:31:44,535) - Starting with JobEnvironment(job_id=35637827_180, hostname=node111, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:31:44,537) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-30-51/.submitit/35637827_180/35637827_180_submitted.pkl
+[2024-03-13 11:32:05,929][DeLASE Logger][INFO] - Process ID 2243776 executing task Mary-Anesthesia-20160809-01, all, 180, with JobEnvironment(job_id=35637827_180, hostname=node111, local_rank=0(1), node=0(1), global_rank=0(1))
+[2024-03-13 11:32:05,934][DeLASE Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 180 does not exist. Running.
+Loading data: ['lfpSchema']...
+lfpSchema : dict with keys[dataDim,dataUnits,description,dims,history,index,indexUnits,mask,smpInterval,smpRate,timeUnits,userData,]
+
+Data loaded (took 0.26 seconds)
+[2024-03-13 11:32:40,650][DeLASE Logger][INFO] - Fitting DeLASE
+Computing Hankel matrix ...
+Hankel matrix computed!
+Computing SVD on Hankel matrix ...
+SVD complete!
+Computing least squares fits to HAVOK DMD ...
+Least squares complete! 
+
+Computing jacbians...
+Computing DDE characteristic roots...
+Characteristic root computation complete!
+Filtering characteristic roots...
+Stability analysis complete
+[2024-03-13 11:32:56,509][DeLASE Logger][INFO] - DeLASE fit in 15.85904574394226 seconds
+[2024-03-13 11:32:56,510][DeLASE Logger][INFO] - Computing metrics
+[2024-03-13 11:32:59,889][DeLASE Logger][INFO] - AIC: DeLASE: -12.410931366411697, PB: -10.65814978591566, VAR: -10.078772735467544, VAR_small: -4.517943036692632
+[2024-03-13 11:32:59,890][DeLASE Logger][INFO] - Metrics computed!
+[2024-03-13 11:32:59,892][DeLASE Logger][INFO] - Saving results
+submitit INFO (2024-03-13 11:32:59,896) - Job completed successfully
+[2024-03-13 11:32:59,896][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:32:59,908) - Exiting after successful completion
+[2024-03-13 11:32:59,908][submitit][INFO] - Exiting after successful completion

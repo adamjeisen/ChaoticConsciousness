@@ -4,6 +4,7 @@ import os
 import pandas as pd
 from spynal.matIO import loadmat
 import time
+from tqdm.auto import tqdm
 
 def get_data_class(session, all_data_dir):
     data_class = None
@@ -15,6 +16,39 @@ def get_data_class(session, all_data_dir):
         raise ValueError(f"Neural data for session {session} could not be found in the provided folder.")
 
     return data_class
+
+def compile_grid_results(session, grid_search_results_dir, areas=None, normed=False):
+    if normed is False:
+        norm_folder = 'NOT_NORMED'
+    else:
+        norm_folder = 'NORMED'
+
+    if areas is None:
+        areas = os.listdir(os.path.join(grid_search_results_dir, session, norm_folder))
+
+    session_results = {}
+    for area in areas:
+        df = pd.DataFrame({'window': [], 'matrix_size': [], 'r': [], 'AICs': [], 'time_vals': [], 'file_paths': []}).set_index(['window', 'matrix_size', 'r'])
+        area_folder = os.path.join(grid_search_results_dir, session, norm_folder, area)
+        for f in os.listdir(area_folder):
+            t = float(f.split('_')[0])
+            file_path = os.path.join(area_folder, f)
+            df_new = pd.DataFrame(pd.read_pickle(file_path))
+            if np.isnan(df_new.AIC).sum() > 0:
+                print(file_path)
+            df_new = df_new.set_index(['window', 'matrix_size', 'r'])
+            for i, row in df_new.iterrows():
+                if i in df.index:
+                    df.loc[i, 'AICs'].append(row.AIC)
+                    df.loc[i, 'time_vals'].append(t)
+                    df.loc[i, 'file_paths'].append(file_path)
+                else:
+                    df.loc[i] = {'AICs': [row.AIC], 'time_vals': [t], 'file_paths': [file_path]}
+
+        df = df.loc[df.index.sortlevel()[0]]
+        session_results[area] = df
+    
+    return session_results
 
 def combine_grid_results(results_dict):
     all_results = None
@@ -63,6 +97,85 @@ def combine_grid_results(results_dict):
 
     return window, matrix_size, r, all_results
 
+def get_chosen_params(session, stability_results_dir, grid_search_results_dir, normed=False):
+    chosen_params_dir = os.path.join(stability_results_dir, 'chosen_params')
+    os.makedirs(chosen_params_dir, exist_ok=True)
+    chosen_params_filepath = os.path.join(chosen_params_dir, session)
+    if os.path.exists(chosen_params_filepath):
+        chosen_params = pd.read_pickle(chosen_params_filepath)
+    else:
+        session_grid_results = compile_grid_results(session, grid_search_results_dir, normed=normed)
+        chosen_params = {}
+        for area in session_grid_results.keys():
+            window, matrix_size, r, all_results = combine_grid_results({area: session_grid_results[area]})
+            chosen_params[area] = dict(
+                window=window,
+                matrix_size=matrix_size,
+                r=r
+            )
+        pd.to_pickle(chosen_params, chosen_params_filepath)
+    
+    return chosen_params
+
+def get_stability_run_list(session, stability_results_dir, grid_search_results_dir, all_data_dir, normed=False, T_pred=None, stride=None):
+    stability_run_list_dir = os.path.join(stability_results_dir, 'stability_run_lists')
+    os.makedirs(stability_run_list_dir, exist_ok=True)
+    stability_run_list_file = os.path.join(stability_run_list_dir, session) 
+
+    if os.path.exists(stability_run_list_file):
+        stability_run_list = pd.read_pickle(stability_run_list_file)
+
+    # MAKE THE LIST
+    else:
+        chosen_params = get_chosen_params(session, stability_results_dir, grid_search_results_dir, normed=normed)
+
+        # GET SESSION INFO
+        data_class = get_data_class(session, all_data_dir)
+
+        os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+        variables = ['electrodeInfo', 'lfpSchema']
+        session_vars, T, N, dt = load_session_data(session, all_data_dir, variables, data_class=data_class, verbose=False)
+        electrode_info, lfp_schema = session_vars['electrodeInfo'], session_vars['lfpSchema']
+        areas = np.unique(electrode_info['area'])
+        areas = np.concatenate((areas, ('all',)))
+
+        directory_path = os.path.join(all_data_dir, data_class, session + '_lfp_chunked_20s', 'directory')
+
+        stability_run_list = {}
+        for area in areas:
+            stability_run_list[area] = []
+            window = chosen_params[area]['window']
+            if stride is None:
+                stride = window
+            if T_pred is None:
+                T_pred = window
+        
+            if area == 'all':
+                unit_indices = np.arange(len(electrode_info['area']))
+            else:
+                unit_indices = np.where(electrode_info['area'] == area)[0]
+            
+            num_windows = int(np.floor((T - (window + T_pred))/stride)) + 1
+            window_start_times = np.arange(num_windows)*dt*stride
+        
+            for window_start in window_start_times:
+                stability_run_list[area].append(dict(
+                    session=session,
+                    area=area,
+                    window_start=window_start,
+                    window_end=window_start + window*dt,
+                    test_window_start=window_start + window*dt,
+                    test_window_end=window_start + (T_pred + window)*dt,
+                    dimension_inds=unit_indices,
+                    directory_path=directory_path
+                ))
+        
+                stability_run_list[area][-1] = stability_run_list[area][-1] | chosen_params[area]
+
+        pd.to_pickle(stability_run_list, stability_run_list_file)
+    
+    return stability_run_list
+
 def save_lfp_chunks(session, chunk_time_s=4*60):
     all_data_dir = f"/om/user/eisenaj/datasets/anesthesia/mat"
     data_class = get_data_class(session, all_data_dir)
@@ -72,6 +185,7 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
     start = time.process_time()
     lfp, lfp_schema = loadmat(filename, variables=['lfp', 'lfpSchema'], verbose=False)
     dt = lfp_schema['smpInterval'][0]
+    fs = 1/dt
     print(f"Data loaded (took {time.process_time() - start:.2f} seconds)")
     
     save_dir = os.path.join(all_data_dir, data_class, f"{session}_lfp_chunked_{chunk_time_s}s")
@@ -86,9 +200,9 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
         chunk = lfp[start_ind:end_ind]
         filepath = os.path.join(save_dir, f"chunk_{i}")
         if os.path.exists(filepath):
-            print(f"Chunk at {file_path} already exists")
+            print(f"Chunk at {filepath} already exists")
         else:
-            save(chunk, filepath)
+            pd.to_pickle(chunk, filepath)
             directory.append(dict(
                 start_ind=start_ind,
                 end_ind=end_ind,
@@ -99,7 +213,7 @@ def save_lfp_chunks(session, chunk_time_s=4*60):
     
     directory = pd.DataFrame(directory)
     
-    save(directory, os.path.join(save_dir, "directory"))
+    pd.to_pickle(directory, os.path.join(save_dir, "directory"))
 #         print(f"Chunk: {start_ind/(1000*60)} min to {end_ind/(1000*60)} ([{start_ind}, {end_ind}])")
 
 def load_window_from_chunks(window_start, window_end, directory, dimension_inds=None):

@@ -1,0 +1,30 @@
+submitit INFO (2024-03-13 11:31:43,353) - Starting with JobEnvironment(job_id=35637827_136, hostname=apollo001, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:31:43,353) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-30-51/.submitit/35637827_136/35637827_136_submitted.pkl
+[2024-03-13 11:31:58,967][DeLASE Logger][INFO] - Process ID 327855 executing task Mary-Anesthesia-20160809-01, all, 136, with JobEnvironment(job_id=35637827_136, hostname=apollo001, local_rank=0(1), node=0(1), global_rank=0(1))
+[2024-03-13 11:31:58,974][DeLASE Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 136 does not exist. Running.
+Loading data: ['lfpSchema']...
+lfpSchema : dict with keys[dataDim,dataUnits,description,dims,history,index,indexUnits,mask,smpInterval,smpRate,timeUnits,userData,]
+
+Data loaded (took 0.26 seconds)
+[2024-03-13 11:32:03,086][DeLASE Logger][INFO] - Fitting DeLASE
+Computing Hankel matrix ...
+Hankel matrix computed!
+Computing SVD on Hankel matrix ...
+SVD complete!
+Computing least squares fits to HAVOK DMD ...
+Least squares complete! 
+
+Computing jacbians...
+Computing DDE characteristic roots...
+Characteristic root computation complete!
+Filtering characteristic roots...
+Stability analysis complete
+[2024-03-13 11:32:21,799][DeLASE Logger][INFO] - DeLASE fit in 18.712769269943237 seconds
+[2024-03-13 11:32:21,799][DeLASE Logger][INFO] - Computing metrics
+[2024-03-13 11:32:24,995][DeLASE Logger][INFO] - AIC: DeLASE: -11.657251369621937, PB: -9.8003677613928, VAR: -9.64856568492435, VAR_small: -3.9908213253122446
+[2024-03-13 11:32:24,995][DeLASE Logger][INFO] - Metrics computed!
+[2024-03-13 11:32:24,999][DeLASE Logger][INFO] - Saving results
+submitit INFO (2024-03-13 11:32:25,004) - Job completed successfully
+[2024-03-13 11:32:25,004][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:32:25,015) - Exiting after successful completion
+[2024-03-13 11:32:25,015][submitit][INFO] - Exiting after successful completion

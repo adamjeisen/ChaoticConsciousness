@@ -1,0 +1,9 @@
+submitit INFO (2024-03-13 11:31:38,946) - Starting with JobEnvironment(job_id=35637827_0, hostname=node080, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:31:38,946) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-30-51/.submitit/35637827_0/35637827_0_submitted.pkl
+[2024-03-13 11:31:42,649][DeLASE Logger][INFO] - Process ID 114722 executing task Mary-Anesthesia-20160809-01, all, 0, with JobEnvironment(job_id=35637827_0, hostname=node080, local_rank=0(1), node=0(1), global_rank=0(1))
+skip
+[2024-03-13 11:31:42,655][DeLASE Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 0 already exists. Skipping.
+submitit INFO (2024-03-13 11:31:42,655) - Job completed successfully
+[2024-03-13 11:31:42,655][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:31:42,663) - Exiting after successful completion
+[2024-03-13 11:31:42,663][submitit][INFO] - Exiting after successful completion

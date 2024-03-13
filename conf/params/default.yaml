@@ -1,0 +1,11 @@
+stability_results_dir: /scratch2/weka/millerlab/eisenaj/ChaoticConsciousness/stability_results_redone
+grid_search_results_dir: /scratch2/weka/millerlab/eisenaj/ChaoticConsciousness/grid_search_results
+all_data_dir: '/scratch2/weka/millerlab/eisenaj/datasets/anesthesia/mat'
+area: area1
+run_index: 0
+T_pred: null
+stride: null
+normed: False
+max_freq: 500
+max_unstable_freq: 125
+subsample: 1

@@ -1,0 +1,24 @@
+submitit INFO (2024-03-13 11:22:32,890) - Starting with JobEnvironment(job_id=35637566, hostname=node067, local_rank=0(1), node=0(1), global_rank=0(1))
+submitit INFO (2024-03-13 11:22:32,890) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/multirun/2024-03-13/11-22-29/.submitit/35637566/35637566_submitted.pkl
+[2024-03-13 11:22:45,325][Jacobian Logger][INFO] - Process ID 3301305 executing task Mary-Anesthesia-20160809-01, all, 0, with JobEnvironment(job_id=35637566, hostname=node067, local_rank=0(1), node=0(1), global_rank=0(1))
+[2024-03-13 11:22:45,341][Jacobian Logger][INFO] - Session Mary-Anesthesia-20160809-01 area run index 0 does not exist. Running.
+Loading data: ['lfpSchema']...
+lfpSchema : dict with keys[dataDim,dataUnits,description,dims,history,index,indexUnits,mask,smpInterval,smpRate,timeUnits,userData,]
+
+Data loaded (took 0.47 seconds)
+Computing Hankel matrix ...
+Hankel matrix computed!
+Computing SVD on Hankel matrix ...
+SVD complete!
+Computing least squares fits to HAVOK DMD ...
+Least squares complete! 
+
+Computing jacbians...
+Computing DDE characteristic roots...
+Characteristic root computation complete!
+Filtering characteristic roots...
+Stability analysis complete
+submitit INFO (2024-03-13 11:23:24,139) - Job completed successfully
+[2024-03-13 11:23:24,139][submitit][INFO] - Job completed successfully
+submitit INFO (2024-03-13 11:23:24,158) - Exiting after successful completion
+[2024-03-13 11:23:24,158][submitit][INFO] - Exiting after successful completion
