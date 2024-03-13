@@ -7,7 +7,7 @@ import submitit
 import time
 import torch
 
-from data_utils import get_data_class, get_stability_run_list, load_session_data, load_window_from_chunks
+from .data_utils import get_data_class, get_stability_run_list, load_session_data, load_window_from_chunks
 
 from delase import DeLASE 
 from delase.metrics import aic, mase, mse, r2_score
