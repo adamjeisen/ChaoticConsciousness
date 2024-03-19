@@ -1,15 +1,14 @@
 defaults:
   - params: default
-  - session: default
   - slurm: default
   - _self_
 
 hydra:
   job:
     chdir: True
-  sweeper:
-    params:
-      ++params.run_index: ${session.run_indices.${params.area}}
+  # sweeper:
+  #   params:
+  #     ++params.run_index: ${session.run_indices.${params.area}}
   # run:
   #   dir: /scratch2/weka/millerlab/eisenaj/CommunicationTransformer/jacobian_multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
   # sweep:

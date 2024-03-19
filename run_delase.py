@@ -7,7 +7,7 @@ import submitit
 import time
 import torch
 
-from .data_utils import get_data_class, get_stability_run_list, load_session_data, load_window_from_chunks
+from data_utils import get_data_class, get_stability_run_list, load_session_data, load_window_from_chunks
 
 from delase import DeLASE 
 from delase.metrics import aic, mase, mse, r2_score
@@ -131,29 +131,29 @@ def main(cfg):
     # INITIALIZE
     try:
         env = submitit.JobEnvironment()
-        log.info(f"Process ID {os.getpid()} executing task {cfg.session.session_name}, {cfg.params.area}, {cfg.params.run_index}, with {env}")
+        log.info(f"Process ID {os.getpid()} executing task {cfg.params.session}, {cfg.params.area}, {cfg.params.run_index}, with {env}")
     except RuntimeError as e:
         # print(e)
-        log.info(f"Process ID {os.getpid()} executing task {cfg.session.session_name}, {cfg.params.area}, {cfg.params.run_index} locally")
+        log.info(f"Process ID {os.getpid()} executing task {cfg.params.session}, {cfg.params.area}, {cfg.params.run_index} locally")
 
     # GET RUN PARAMETERS
 
-    stability_run_list = get_stability_run_list(cfg.session.session_name, cfg.params.stability_results_dir, cfg.params.grid_search_results_dir, cfg.params.all_data_dir, T_pred=cfg.params.T_pred, stride=cfg.params.stride)
+    stability_run_list = get_stability_run_list(cfg.params.session, cfg.params.stability_results_dir, cfg.params.grid_search_results_dir, cfg.params.all_data_dir, T_pred=cfg.params.T_pred, stride=cfg.params.stride)
     run_params = stability_run_list[cfg.params.area][cfg.params.run_index]
 
     normed_folder = 'NOT_NORMED' if not cfg.params.normed else 'NORMED'
-    save_dir = os.path.join(cfg.params.stability_results_dir, 'stability_results', cfg.session.session_name, normed_folder, f"SUBSAMPLE_{cfg.params.subsample}", run_params['area'])
+    save_dir = os.path.join(cfg.params.stability_results_dir, 'stability_results', cfg.params.session, normed_folder, f"SUBSAMPLE_{cfg.params.subsample}", run_params['area'])
     os.makedirs(save_dir, exist_ok=True)
 
     save_file_path = os.path.join(save_dir, f"run_index-{cfg.params.run_index}.pkl")
 
     if os.path.exists(save_file_path):
         print("skip")
-        log.info(f"Session {cfg.session.session_name} area {cfg.params.area} run index {cfg.params.run_index} already exists. Skipping.")
+        log.info(f"Session {cfg.params.session} area {cfg.params.area} run index {cfg.params.run_index} already exists. Skipping.")
     else:
-        log.info(f"Session {cfg.session.session_name} area {cfg.params.area} run index {cfg.params.run_index} does not exist. Running.")
+        log.info(f"Session {cfg.params.session} area {cfg.params.area} run index {cfg.params.run_index} does not exist. Running.")
 
-        session = cfg.session.session_name
+        session = cfg.params.session
         result = compute_delase(cfg, session, run_params)
 
         log.info("Saving results")

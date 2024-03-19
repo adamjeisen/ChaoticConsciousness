@@ -34,7 +34,10 @@ def barplot_annotate_brackets(num1, num2, p, center, height, it=0, ax=None, ylim
 
         while data < p:
             text += '*'
-            p /= 10.
+            if p == 0.05:
+                p = 0.01
+            else:
+                p /= 10.
 
             if maxasterix and len(text) == maxasterix:
                 break
@@ -112,6 +115,8 @@ def gen_data(p):
         data = 'p < 1e-15'
     elif p <= 0.05 and p >= 1e-4:
         data = p
+    elif p > 0.05:
+        data = 'n. s.'
     else:
         data = f"p < 1e-{int(-np.log10(p))}"
     
