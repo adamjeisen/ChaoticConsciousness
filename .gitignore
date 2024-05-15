@@ -1,6 +1,7 @@
 # My Files
 __data__/
 multirun/
+_jupyter/multirun/
 .idea/
 
 # Byte-compiled / optimized / DLL files
