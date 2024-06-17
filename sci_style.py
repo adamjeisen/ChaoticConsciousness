@@ -1,5 +1,5 @@
 # Figure properties
-figure.figsize: 8, 6
+figure.figsize: 3, 2
 figure.dpi: 300
 # Font properties
 font.family: sans-serif
