@@ -1,3 +1,0 @@
-submitit INFO (2024-03-13 11:43:36,838) - Starting with JobEnvironment(job_id=35638458_467, hostname=node102, local_rank=0(1), node=0(1), global_rank=0(1))
-submitit INFO (2024-03-13 11:43:36,838) - Loading pickle: /rdma/vast-rdma/vast/millerlab/eisenaj/code/ChaoticConsciousness/_jupyter/multirun/2024-03-13/11-41-48/.submitit/35638458_467/35638458_467_submitted.pkl
-submitit ERROR (2024-03-13 11:43:37,019) - Submitted job triggered an exception
